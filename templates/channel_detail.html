@@ -541,7 +541,7 @@
     if (!sel) return;
     try {
       const data = await fetch(`/api/voices?language=${CHANNEL_LANG}`).then(r => r.json());
-      _allVoices = data.voices || [];
+      _allVoices = Array.isArray(data) ? data : (data.voices || []);
       document.getElementById('voiceCount').textContent = `(${_allVoices.length})`;
       renderVoiceOptions(_allVoices);
     } catch(e) {
