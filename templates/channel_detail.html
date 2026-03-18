@@ -486,20 +486,13 @@
           <i class="bi bi-mic-fill"></i> Gerar Áudio
         </button>`;
     }
-    // Load voices async
-    loadVoices();
   }
 
   function renderVoiceSelector() {
     return `
-      <div class="form-row">
-        <label>Voz <span style="font-size:.72rem;color:var(--muted)" id="voiceCount"></span></label>
-        <div class="voice-select-wrap">
-          <input id="voiceSearch" type="text" class="form-dark" placeholder="🔍 Buscar voz por nome…" oninput="filterVoices(this.value)">
-        </div>
-        <select id="voiceSelect" class="form-dark" size="6" style="height:140px">
-          <option disabled>Carregando vozes…</option>
-        </select>
+      <div class="info-row" style="margin-bottom:.25rem">
+        <i class="bi bi-mic-fill" style="color:var(--accent)"></i>
+        <strong>Voz:</strong> Peter (TumdjBNWanlT3ysvclWh)
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
         <div class="form-row">
@@ -535,44 +528,9 @@
       </div>`;
   }
 
-  let _allVoices = [];
-  async function loadVoices() {
-    const sel = document.getElementById('voiceSelect');
-    if (!sel) return;
-    try {
-      const data = await fetch(`/api/voices?language=${CHANNEL_LANG}`).then(r => r.json());
-      _allVoices = Array.isArray(data) ? data : (data.voices || []);
-      document.getElementById('voiceCount').textContent = `(${_allVoices.length})`;
-      renderVoiceOptions(_allVoices);
-    } catch(e) {
-      if (sel) sel.innerHTML = '<option disabled>Erro ao carregar vozes</option>';
-    }
-  }
-
-  function renderVoiceOptions(voices) {
-    const sel = document.getElementById('voiceSelect');
-    if (!sel) return;
-    sel.innerHTML = voices.map(v => {
-      const lbl = v.labels || {};
-      const tags = [lbl.gender, lbl.age, lbl.accent].filter(Boolean).join(', ');
-      return `<option value="${esc(v.voice_id)}">${esc(v.name)}${tags ? ' · ' + esc(tags) : ''}</option>`;
-    }).join('');
-    // Try to pre-select the default voice (Peter); fall back to first option
-    const defOpt = sel.querySelector(`option[value="${DEFAULT_VOICE_ID}"]`);
-    if (defOpt) defOpt.selected = true;
-    else if (voices.length) sel.selectedIndex = 0;
-  }
-
-  function filterVoices(q) {
-    const filtered = q.trim()
-      ? _allVoices.filter(v => v.name.toLowerCase().includes(q.toLowerCase()))
-      : _allVoices;
-    renderVoiceOptions(filtered);
-  }
 
   async function generateAudio() {
-    const voiceId = document.getElementById('voiceSelect')?.value;
-    if (!voiceId) { showToast('⚠️ Selecione uma voz', true); return; }
+    const voiceId = 'TumdjBNWanlT3ysvclWh'; // Peter (fixo)
     const btn = document.getElementById('genAudioBtn');
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split spinning"></i> Enviando…'; }
 
