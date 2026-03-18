@@ -73,45 +73,32 @@ def _similarity(query: str, title: str) -> int:
 
     return round(min(score, 100))
 
-# ── Claude model — auto-detectado na inicialização ───────────────────────────
-_CLAUDE_CANDIDATES = [
-    "claude-opus-4-5",
-    "claude-sonnet-4-5",
-    "claude-opus-4-0",
-    "claude-sonnet-4-0",
-    "claude-3-7-sonnet-20250219",
-    "claude-3-5-sonnet-20241022",
-    "claude-3-5-sonnet-20240620",
-    "claude-3-opus-20240229",
-    "claude-3-haiku-20240307",
-]
+# ── Claude model ──────────────────────────────────────────────────────────────
+# Max output tokens por modelo
+_MODEL_MAX_TOKENS: dict = {
+    "claude-opus-4-5":            64000,
+    "claude-sonnet-4-5":          64000,
+    "claude-opus-4-0":            32000,
+    "claude-sonnet-4-0":          64000,
+    "claude-3-7-sonnet-20250219": 64000,
+    "claude-3-5-sonnet-20241022":  8192,
+    "claude-3-5-sonnet-20240620":  8192,
+    "claude-3-5-haiku-20241022":   8192,
+    "claude-3-opus-20240229":      4096,
+    "claude-3-haiku-20240307":     4096,
+}
 
-def _detect_claude_model() -> str:
-    """Interroga a API Anthropic e retorna o melhor modelo disponível."""
-    try:
-        import anthropic as _a
-        client = _a.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-        available = {m.id for m in client.models.list()}
-        for candidate in _CLAUDE_CANDIDATES:
-            if candidate in available:
-                print(f"[Claude] Modelo detectado: {candidate}")
-                return candidate
-        # Nenhum preferido — usa o primeiro disponível que contenha 'sonnet'
-        sonnet = sorted([i for i in available if "sonnet" in i.lower()], reverse=True)
-        if sonnet:
-            print(f"[Claude] Usando fallback sonnet: {sonnet[0]}")
-            return sonnet[0]
-        if available:
-            best = sorted(available, reverse=True)[0]
-            print(f"[Claude] Usando fallback: {best}")
-            return best
-    except Exception as _e:
-        print(f"[Claude] Não foi possível listar modelos: {_e}")
-    fallback = _CLAUDE_CANDIDATES[0]
-    print(f"[Claude] Usando candidato padrão: {fallback}")
-    return fallback
+# Usa env ANTHROPIC_MODEL se definido e não-vazio; senão fixa no sonnet-4-5
+CLAUDE_MODEL: str = (config.ANTHROPIC_MODEL.strip() or "claude-sonnet-4-5")
+print(f"[Claude] Usando modelo: {CLAUDE_MODEL}")
 
-CLAUDE_MODEL: str = _detect_claude_model()
+
+def _model_max_tokens(model: str) -> int:
+    """Retorna o limite de output tokens do modelo."""
+    for k, v in _MODEL_MAX_TOKENS.items():
+        if k in model:
+            return v
+    return 8192  # padrão seguro para modelos desconhecidos
 
 # ── GenAIPro constants ────────────────────────────────────────────────────────
 GENAIPRO_BASE = "https://genaipro.vn/api/v1"
@@ -540,7 +527,7 @@ def api_script_generate(prod_id):
         client = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
         message = client.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=4000,
+            max_tokens=min(4000, _model_max_tokens(CLAUDE_MODEL)),
             system="Você é um roteirista especialista em vídeos educativos de YouTube sobre história medieval. Cria roteiros envolventes, precisos e adaptados culturalmente para o público-alvo.",
             messages=[{"role": "user", "content": full_prompt}],
         )
@@ -822,9 +809,10 @@ def api_prompts_generate(prod_id):
     try:
         import anthropic as _anthropic
         client = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        _max_tok = _model_max_tokens(CLAUDE_MODEL)
         msg = client.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=8192,
+            max_tokens=_max_tok,
             system=DOTTI_SYSTEM,
             messages=[{"role": "user", "content": user_msg}],
         )

@@ -498,16 +498,16 @@
         <div class="form-row">
           <label>Modelo</label>
           <select id="modelSelect" class="form-dark">
-            <option value="eleven_multilingual_v2">Multilingual v2 (recomendado)</option>
-            <option value="eleven_turbo_v2_5">Turbo v2.5 (rápido)</option>
+            <option value="eleven_turbo_v2_5" selected>Turbo v2.5 (padrão)</option>
+            <option value="eleven_multilingual_v2">Multilingual v2</option>
             <option value="eleven_flash_v2_5">Flash v2.5 (ultrarrápido)</option>
             <option value="eleven_v3">v3 (mais natural)</option>
           </select>
         </div>
         <div class="form-row">
-          <label>Velocidade: <span id="speedVal">1.0</span></label>
+          <label>Velocidade: <span id="speedVal">0.90</span></label>
           <div class="slider-row">
-            <input type="range" id="speedSlider" min="0.7" max="1.2" step="0.05" value="1.0"
+            <input type="range" id="speedSlider" min="0.7" max="1.2" step="0.05" value="0.9"
               oninput="document.getElementById('speedVal').textContent=parseFloat(this.value).toFixed(2)">
           </div>
         </div>
@@ -539,8 +539,8 @@
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
           voice_id:   voiceId,
-          model_id:   document.getElementById('modelSelect')?.value  || 'eleven_multilingual_v2',
-          speed:      parseFloat(document.getElementById('speedSlider')?.value || 1),
+          model_id:   document.getElementById('modelSelect')?.value  || 'eleven_turbo_v2_5',
+          speed:      parseFloat(document.getElementById('speedSlider')?.value || 0.9),
           stability:  parseFloat(document.getElementById('stabSlider')?.value || 0.5),
           similarity: parseFloat(document.getElementById('simSlider')?.value  || 0.75),
         }),
@@ -559,11 +559,22 @@
         startAudioPolling(panelProdId, res.task_id);
         await loadProductions();
       } else {
-        showToast('❌ ' + (res.error || 'Erro ao gerar áudio'), true);
-        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-mic-fill"></i> Gerar Áudio'; }
+        // Mostra erro detalhado da API para facilitar debug
+        const detail = res.detail ? JSON.stringify(res.detail) : '';
+        const msg = (res.error || 'Erro ao gerar áudio') + (detail ? ': ' + detail : '');
+        console.error('[Audio] Erro API:', res);
+        document.getElementById('panelBody').innerHTML = `
+          <div style="color:var(--red);padding:1rem;background:rgba(218,54,51,.08);border-radius:8px;font-size:.82rem">
+            <i class="bi bi-exclamation-triangle-fill"></i> <strong>Erro da API:</strong><br>
+            <code style="word-break:break-all">${esc(msg)}</code>
+          </div>`;
+        document.getElementById('panelFooter').innerHTML = `
+          <button class="btn-accent" id="genAudioBtn" onclick="generateAudio()">
+            <i class="bi bi-arrow-repeat"></i> Tentar novamente
+          </button>`;
       }
     } catch(e) {
-      showToast('❌ Erro de conexão', true);
+      showToast('❌ Erro de conexão: ' + e.message, true);
       if (btn) { btn.disabled = false; }
     }
   }
