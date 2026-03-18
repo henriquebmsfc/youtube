@@ -12,6 +12,7 @@ import os
 YOUTUBE_API_KEY   = os.getenv("YOUTUBE_API_KEY",   "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 GENAIPRO_API_KEY  = os.getenv("GENAIPRO_API_KEY",  "")
+OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY",    "")
 
 # ── Modelo Claude ─────────────────────────────────────────────────
 # Padrão: claude-sonnet-4-5 (64k tokens de saída)

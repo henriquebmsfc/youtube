@@ -861,7 +861,7 @@
   }
 
   // ══════════════════════════════════════════════════════
-  // THUMBNAILS PANEL
+  // THUMBNAILS PANEL  (DALL-E 3)
   // ══════════════════════════════════════════════════════
   function renderThumbnailsPanel(prod) {
     const tasks     = prod.tasks || {};
@@ -869,8 +869,7 @@
     const body = document.getElementById('panelBody');
     const foot = document.getElementById('panelFooter');
 
-    let existingUrls = [];
-    let existingPrompts = [];
+    let existingUrls = [], existingPrompts = [];
     if (thumbTask.result_text) {
       try {
         const d = JSON.parse(thumbTask.result_text);
@@ -883,32 +882,35 @@
       const grid = existingUrls.map((url, i) => `
         <div>
           <div class="thumb-item">
-            <img src="${esc(url)}" alt="Thumbnail ${i+1}" loading="lazy">
-            <a href="${esc(url)}" target="_blank" download class="thumb-dl">
-              <i class="bi bi-download"></i> Baixar
+            <img src="${esc(url)}" alt="Thumbnail ${i+1}" loading="lazy"
+                 onerror="this.closest('.thumb-item').innerHTML='<div style=\'padding:.5rem;font-size:.75rem;color:var(--muted)\'>⚠️ URL expirada — regenere</div>'">
+            <a href="${esc(url)}" target="_blank" class="thumb-dl">
+              <i class="bi bi-box-arrow-up-right"></i> Abrir
             </a>
           </div>
-          ${existingPrompts[i] ? `<div class="thumb-concept">${esc(existingPrompts[i].slice(0,80))}…</div>` : ''}
+          ${existingPrompts[i] ? `<div class="thumb-concept" title="${esc(existingPrompts[i])}">${esc(existingPrompts[i].slice(0,90))}…</div>` : ''}
         </div>`).join('');
       body.innerHTML = `
-        <div class="info-row"><i class="bi bi-check-circle-fill" style="color:var(--green)"></i>
-          <strong>4 thumbnails geradas</strong>
+        <div class="info-row">
+          <i class="bi bi-check-circle-fill" style="color:var(--green)"></i>
+          <strong>${existingUrls.length} thumbnail${existingUrls.length>1?'s':''} gerada${existingUrls.length>1?'s':''} com DALL-E 3</strong>
+          <span style="font-size:.75rem;color:var(--muted);margin-left:.5rem">(URLs expiram em ~1h — salve as imagens)</span>
         </div>
         <div class="thumb-grid">${grid}</div>`;
       foot.innerHTML = `
         <button class="btn-accent" id="genThumbBtn" onclick="generateThumbnails()">
-          <i class="bi bi-arrow-repeat"></i> Regerar Thumbnails
+          <i class="bi bi-arrow-repeat"></i> Regerar com DALL-E 3
         </button>`;
     } else {
       body.innerHTML = `
         <div class="info-row">
           <i class="bi bi-info-circle" style="color:var(--blue)"></i>
-          O sistema gera 4 thumbnails com conceitos visuais diferentes usando IA (GenAIPro VEO)
+          Gera 4 thumbnails com conceitos visuais distintos usando <strong>DALL-E 3 HD</strong>
         </div>
-        <div style="font-size:.82rem;color:var(--muted);margin-bottom:.5rem">
-          • Formato 16:9 (YouTube padrão)<br>
-          • Cada thumbnail usa um conceito diferente<br>
-          • Gerado a partir do título e roteiro
+        <div style="font-size:.82rem;color:var(--muted);margin-bottom:.75rem">
+          • Formato 1792×1024 (16:9, padrão YouTube)<br>
+          • Claude cria os prompts → DALL-E 3 gera as imagens<br>
+          • ~30–60 segundos por imagem (4 imagens = ~2–4 min)
         </div>
         <div class="empty-state" style="padding:2rem">
           <div class="ei">🖼️</div>
@@ -916,58 +918,89 @@
         </div>`;
       foot.innerHTML = `
         <button class="btn-accent" id="genThumbBtn" onclick="generateThumbnails()">
-          <i class="bi bi-image"></i> Gerar 4 Thumbnails
+          <i class="bi bi-image"></i> Gerar 4 Thumbnails (DALL-E 3)
         </button>`;
     }
   }
 
   async function generateThumbnails() {
     const btn = document.getElementById('genThumbBtn');
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split spinning"></i> Gerando…'; }
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split spinning"></i> Iniciando…'; }
     try {
       const res = await fetch(`/api/productions/${panelProdId}/tasks/thumbnails/generate`,
         { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' }).then(r => r.json());
       if (res.success) {
-        showToast('🖼️ Gerando thumbnails… aguarde', false);
-        document.getElementById('panelBody').innerHTML = `
-          <div style="text-align:center;padding:3rem;color:var(--muted)">
-            <i class="bi bi-image spinning" style="font-size:2.5rem;color:var(--purple)"></i>
-            <div style="margin-top:1rem;font-weight:600">Gerando 4 thumbnails com IA…</div>
-            <div style="font-size:.8rem;margin-top:.4rem">Cada imagem pode levar 30–60 segundos</div>
-            <div id="thumbPollInfo" style="margin-top:1rem;font-size:.78rem;color:var(--muted)"></div>
-          </div>`;
-        document.getElementById('panelFooter').innerHTML = '';
+        _showThumbProgress(0, 4, 'Claude gerando prompts…');
         startThumbPolling(panelProdId, res.job_id);
       } else {
         showToast('❌ ' + (res.error || 'Erro'), true);
-        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-image"></i> Gerar 4 Thumbnails'; }
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-image"></i> Gerar 4 Thumbnails (DALL-E 3)'; }
       }
-    } catch(e) { showToast('❌ Erro', true); }
+    } catch(e) { showToast('❌ Erro de conexão', true); if (btn) btn.disabled = false; }
+  }
+
+  function _showThumbProgress(done, total, label) {
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    document.getElementById('panelBody').innerHTML = `
+      <div style="text-align:center;padding:2.5rem 1.5rem;color:var(--muted)">
+        <i class="bi bi-image spinning" style="font-size:2.5rem;color:var(--purple)"></i>
+        <div style="margin-top:1rem;font-weight:600;color:var(--text)">Gerando thumbnails com DALL-E 3…</div>
+        <div style="font-size:.82rem;margin-top:.3rem">${label}</div>
+        <div style="margin-top:1.25rem;background:var(--border);border-radius:99px;height:6px;overflow:hidden">
+          <div style="background:var(--purple);height:100%;width:${pct}%;transition:width .4s ease;border-radius:99px"></div>
+        </div>
+        <div style="font-size:.78rem;margin-top:.5rem;color:var(--muted)">${done} / ${total} imagens</div>
+        <div style="margin-top:1rem;font-size:.78rem;color:var(--muted);
+                    background:rgba(56,139,253,.08);border:1px solid rgba(56,139,253,.2);
+                    border-radius:8px;padding:.5rem .9rem;display:inline-block">
+          <i class="bi bi-arrow-left-right"></i>
+          Executando em segundo plano — você pode navegar para outras telas
+        </div>
+      </div>`;
+    document.getElementById('panelFooter').innerHTML =
+      `<button class="btn-outline" onclick="closePanel()"><i class="bi bi-x"></i> Fechar painel</button>`;
   }
 
   function startThumbPolling(prodId, jobId) {
     clearInterval(_thumbPollTimer);
-    let attempt = 0;
     _thumbPollTimer = setInterval(async () => {
-      attempt++;
       try {
         const data = await fetch(`/api/thumbnails/status/${jobId}`).then(r => r.json());
-        const info = document.getElementById('thumbPollInfo');
-        if (info) info.textContent = `Gerando… (${attempt * 5}s)`;
-        if (data.status === 'done') {
-          clearInterval(_thumbPollTimer);
-          showToast('✅ Thumbnails geradas!', false);
-          await loadProductions();
-          if (panelProdId === prodId && panelMode === 'thumbnails') {
+        const done  = data.done  || 0;
+        const total = data.total || 4;
+        const label = data.status === 'processing'
+          ? (done === 0 ? 'Claude gerando prompts…' : `Imagem ${done} de ${total} concluída`)
+          : '';
+
+        if (panelProdId === prodId && panelMode === 'thumbnails') {
+          if (data.status === 'processing') {
+            _showThumbProgress(done, total, label);
+          } else if (data.status === 'done') {
+            clearInterval(_thumbPollTimer);
+            showToast(`✅ ${data.urls?.length || total} thumbnails geradas!`, false);
+            await loadProductions();
             const prod = productions.find(p => p.id === prodId);
             if (prod) renderThumbnailsPanel(prod);
+          } else if (data.status === 'error') {
+            clearInterval(_thumbPollTimer);
+            document.getElementById('panelBody').innerHTML = _errHtml(data.error);
+            document.getElementById('panelFooter').innerHTML =
+              `<button class="btn-accent" id="genThumbBtn" onclick="generateThumbnails()">
+                 <i class="bi bi-image"></i> Tentar novamente
+               </button>`;
           }
-        } else if (data.status === 'error') {
-          clearInterval(_thumbPollTimer);
-          showToast('❌ ' + (data.error || 'Erro ao gerar thumbnails'), true);
+        } else {
+          // Panel not visible but job is running — just check for done to show toast
+          if (data.status === 'done') {
+            clearInterval(_thumbPollTimer);
+            showToast('✅ Thumbnails prontas!', false);
+            await loadProductions();
+          } else if (data.status === 'error') {
+            clearInterval(_thumbPollTimer);
+          }
         }
       } catch(e) {}
-    }, 5000);
+    }, 4000);
   }
 
   // ── Task modal (manual: video / posting) ─────────────────────────────────

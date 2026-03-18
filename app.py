@@ -900,82 +900,91 @@ def api_thumbnails_generate(prod_id):
     script_text = tasks.get("script", {}).get("result_text", "")
     title       = prod.get("adapted_title") or prod.get("source_title", "")
 
-    # Generate 4 diverse thumbnail prompts with Claude
+    # ── Step 1: Generate 4 diverse prompts with Claude ────────────────────────
     try:
         import anthropic as _anthropic
-        client = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        _ac = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
         prompt_req = (
-            f"Create 4 different YouTube thumbnail image prompts for a medieval history video.\n"
+            f"Create 4 YouTube thumbnail image prompts for a medieval history video.\n"
             f"Title: {title}\n"
-            + (f"Script excerpt: {script_text[:600]}\n" if script_text else "") +
-            "\nRequirements for each prompt:\n"
-            "- Epic medieval scene, dramatically different visual concept for each\n"
-            "- Photorealistic, cinematic, 16:9 format, high detail\n"
-            "- Each one should emphasize a different aspect: e.g. battle, castle, portrait, map/artifact\n"
-            "Return a JSON array of 4 strings, each a complete image generation prompt. "
-            "No extra text, just the JSON array."
+            + (f"Script excerpt: {script_text[:600]}\n" if script_text else "")
+            + "\nRules:\n"
+            "- Each prompt must describe a dramatically DIFFERENT visual concept\n"
+            "- Cover different aspects: e.g. battle scene, castle/landscape, character portrait, artifact/map\n"
+            "- Photorealistic, cinematic quality, 16:9 widescreen composition\n"
+            "- No text, logos, watermarks or letters in the image\n"
+            "- Write each prompt as a single, self-contained DALL-E 3 image generation prompt\n"
+            "- Be vivid and specific about lighting, mood, colors, camera angle\n"
+            "Return ONLY a JSON array of 4 strings. No extra text, no markdown."
         )
-        with client.messages.stream(
-            model=CLAUDE_MODEL, max_tokens=1200,
+        with _ac.messages.stream(
+            model=CLAUDE_MODEL, max_tokens=1500,
             messages=[{"role": "user", "content": prompt_req}],
         ) as stream:
             raw = stream.get_final_text().strip()
-        if raw.startswith("```"):
-            raw = re.sub(r"^```(?:json)?\s*", "", raw)
-            raw = re.sub(r"\s*```$", "", raw).strip()
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw).strip()
         thumb_prompts = _json.loads(raw)
-        if not isinstance(thumb_prompts, list):
-            raise ValueError("Expected list")
-    except Exception:
+        if not isinstance(thumb_prompts, list) or len(thumb_prompts) == 0:
+            raise ValueError("Expected non-empty list")
+        thumb_prompts = [str(p) for p in thumb_prompts[:4]]
+    except Exception as _pe:
+        print(f"[Thumbnails] Claude prompt error: {_pe} — using fallback prompts")
         thumb_prompts = [
-            f"Epic medieval battle scene, dramatic cinematic lighting, {title}, photorealistic 8K",
-            f"Majestic medieval castle at sunset, dramatic sky, {title}, photorealistic cinematic",
-            f"Medieval knight portrait, dramatic close-up, armor detail, {title}, photorealistic 8K",
-            f"Ancient medieval map and artifacts, dramatic lighting, {title}, photorealistic cinematic",
+            f"Epic medieval battlefield at dusk, two armies clashing, dramatic low-angle shot, cinematic lighting, photorealistic, 16:9, no text",
+            f"Majestic gothic cathedral interior, golden light streaming through stained glass, medieval pilgrims, photorealistic, cinematic, no text",
+            f"Close-up portrait of a medieval knight in ornate armor, battle-worn face, dramatic rim lighting, photorealistic, no text",
+            f"Ancient illuminated manuscript and relics on a stone table, candlelight, dark moody atmosphere, photorealistic, no text",
         ]
 
+    # ── Step 2: Generate images with DALL-E 3 in background ───────────────────
     job_id = str(uuid.uuid4())
-    _thumbnail_jobs[job_id] = {"status": "processing", "urls": [], "error": None,
-                                "prompts": thumb_prompts}
+    _thumbnail_jobs[job_id] = {
+        "status":  "processing",
+        "total":   len(thumb_prompts),
+        "done":    0,
+        "urls":    [],
+        "prompts": thumb_prompts,
+        "error":   None,
+    }
 
-    def _generate():
+    def _generate_dalle():
+        from openai import OpenAI as _OAI
+        oai = _OAI(api_key=config.OPENAI_API_KEY)
         urls = []
-        for p in thumb_prompts:
+        for i, p in enumerate(thumb_prompts):
             try:
-                resp = http_requests.post(
-                    f"{GENAIPRO_BASE}/veo/create-image",
-                    headers={"Authorization": f"Bearer {config.GENAIPRO_API_KEY}"},
-                    data={"prompt": p, "aspect_ratio": "IMAGE_ASPECT_RATIO_LANDSCAPE",
-                          "number_of_images": 1},
-                    stream=True, timeout=300,
+                resp = oai.images.generate(
+                    model="dall-e-3",
+                    prompt=p,
+                    size="1792x1024",   # closest to 16:9 available in DALL-E 3
+                    quality="hd",
+                    n=1,
                 )
-                found = []
-                for line in resp.iter_lines():
-                    if not line:
-                        continue
-                    line = line.decode("utf-8") if isinstance(line, bytes) else line
-                    if line.startswith("data:"):
-                        try:
-                            d = _json.loads(line[5:].strip())
-                            if d.get("status") == "completed":
-                                found = d.get("file_urls", [])
-                                break
-                            if d.get("file_urls"):
-                                found = d["file_urls"]
-                        except Exception:
-                            pass
-                urls.extend(found if found else [])
-            except Exception:
-                pass
-        if urls:
-            _thumbnail_jobs[job_id].update(status="done", urls=urls)
-            database.upsert_task(prod_id, "thumbnails", "done",
-                                 result_text=_json.dumps({"urls": urls, "prompts": thumb_prompts}))
-        else:
-            _thumbnail_jobs[job_id].update(status="error",
-                                            error="Nenhuma imagem gerada — verifique créditos VEO")
+                url = resp.data[0].url
+                urls.append(url)
+                _thumbnail_jobs[job_id]["done"] = i + 1
+                print(f"[DALL-E] {i+1}/{len(thumb_prompts)} done")
+            except Exception as _ie:
+                print(f"[DALL-E] image {i+1} error: {_ie}")
+                urls.append(None)   # placeholder so indices stay aligned
+                _thumbnail_jobs[job_id]["done"] = i + 1
 
-    threading.Thread(target=_generate, daemon=True).start()
+        real_urls = [u for u in urls if u]
+        if real_urls:
+            _thumbnail_jobs[job_id].update(status="done", urls=real_urls)
+            database.upsert_task(prod_id, "thumbnails", "done",
+                                 result_text=_json.dumps({
+                                     "urls":    real_urls,
+                                     "prompts": thumb_prompts,
+                                 }))
+        else:
+            _thumbnail_jobs[job_id].update(
+                status="error",
+                error="Nenhuma imagem gerada — verifique créditos OpenAI / DALL-E 3",
+            )
+
+    threading.Thread(target=_generate_dalle, daemon=True).start()
     return jsonify({"success": True, "job_id": job_id})
 
 
@@ -984,7 +993,10 @@ def api_thumbnails_status(job_id):
     job = _thumbnail_jobs.get(job_id)
     if not job:
         return jsonify({"error": "Job não encontrado"}), 404
-    return jsonify(job)
+    # Include progress fraction for the UI
+    total = job.get("total", len(job.get("prompts", []))) or 1
+    done  = job.get("done", 0)
+    return jsonify({**job, "progress": f"{done}/{total}"})
 
 
 # ── Startup (runs under both `python app.py` and gunicorn) ───────────────────
