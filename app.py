@@ -896,59 +896,74 @@ def api_thumbnails_generate(prod_id):
     if not prod:
         return jsonify({"error": "Produção não encontrada"}), 404
 
+    # Reject if already running for this production
+    existing = _thumbnail_jobs.get(prod_id, {})
+    if existing.get("status") == "processing":
+        return jsonify({"queued": True, "already_running": True})
+
     tasks       = prod.get("tasks") or {}
     script_text = tasks.get("script", {}).get("result_text", "")
     title       = prod.get("adapted_title") or prod.get("source_title", "")
 
-    # ── Step 1: Generate 4 diverse prompts with Claude ────────────────────────
-    try:
-        import anthropic as _anthropic
-        _ac = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-        prompt_req = (
-            f"Create 4 YouTube thumbnail image prompts for a medieval history video.\n"
-            f"Title: {title}\n"
-            + (f"Script excerpt: {script_text[:600]}\n" if script_text else "")
-            + "\nRules:\n"
-            "- Each prompt must describe a dramatically DIFFERENT visual concept\n"
-            "- Cover different aspects: e.g. battle scene, castle/landscape, character portrait, artifact/map\n"
-            "- Photorealistic, cinematic quality, 16:9 widescreen composition\n"
-            "- No text, logos, watermarks or letters in the image\n"
-            "- Write each prompt as a single, self-contained DALL-E 3 image generation prompt\n"
-            "- Be vivid and specific about lighting, mood, colors, camera angle\n"
-            "Return ONLY a JSON array of 4 strings. No extra text, no markdown."
-        )
-        with _ac.messages.stream(
-            model=CLAUDE_MODEL, max_tokens=1500,
-            messages=[{"role": "user", "content": prompt_req}],
-        ) as stream:
-            raw = stream.get_final_text().strip()
-        raw = re.sub(r"^```(?:json)?\s*", "", raw)
-        raw = re.sub(r"\s*```$", "", raw).strip()
-        thumb_prompts = _json.loads(raw)
-        if not isinstance(thumb_prompts, list) or len(thumb_prompts) == 0:
-            raise ValueError("Expected non-empty list")
-        thumb_prompts = [str(p) for p in thumb_prompts[:4]]
-    except Exception as _pe:
-        print(f"[Thumbnails] Claude prompt error: {_pe} — using fallback prompts")
-        thumb_prompts = [
-            f"Epic medieval battlefield at dusk, two armies clashing, dramatic low-angle shot, cinematic lighting, photorealistic, 16:9, no text",
-            f"Majestic gothic cathedral interior, golden light streaming through stained glass, medieval pilgrims, photorealistic, cinematic, no text",
-            f"Close-up portrait of a medieval knight in ornate armor, battle-worn face, dramatic rim lighting, photorealistic, no text",
-            f"Ancient illuminated manuscript and relics on a stone table, candlelight, dark moody atmosphere, photorealistic, no text",
-        ]
+    # Mark in_progress in DB immediately so panel shows spinner on return
+    database.upsert_task(prod_id, "thumbnails", "in_progress")
 
-    # ── Step 2: Generate images with DALL-E 3 in background ───────────────────
-    job_id = str(uuid.uuid4())
-    _thumbnail_jobs[job_id] = {
+    # Job keyed by prod_id (not a random UUID) so it can be found without job_id
+    _thumbnail_jobs[prod_id] = {
         "status":  "processing",
-        "total":   len(thumb_prompts),
+        "phase":   "prompts",   # "prompts" → "images"
+        "total":   4,
         "done":    0,
         "urls":    [],
-        "prompts": thumb_prompts,
+        "prompts": [],
         "error":   None,
     }
 
-    def _generate_dalle():
+    def _bg_thumbnails():
+        import json as _j
+        job = _thumbnail_jobs[prod_id]
+
+        # ── Phase 1: Claude generates 4 DALL-E prompts ────────────────────────
+        try:
+            import anthropic as _anthropic
+            _ac = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+            prompt_req = (
+                f"Create 4 YouTube thumbnail image prompts for a medieval history video.\n"
+                f"Title: {title}\n"
+                + (f"Script excerpt: {script_text[:600]}\n" if script_text else "")
+                + "\nRules:\n"
+                "- Each prompt must describe a dramatically DIFFERENT visual concept\n"
+                "- Cover different aspects: e.g. battle scene, castle/landscape, character portrait, artifact/map\n"
+                "- Photorealistic, cinematic quality, 16:9 widescreen composition\n"
+                "- No text, logos, watermarks or letters in the image\n"
+                "- Write each prompt as a single, self-contained DALL-E 3 image generation prompt\n"
+                "- Be vivid and specific about lighting, mood, colors, camera angle\n"
+                "Return ONLY a JSON array of 4 strings. No extra text, no markdown."
+            )
+            with _ac.messages.stream(
+                model=CLAUDE_MODEL, max_tokens=1500,
+                messages=[{"role": "user", "content": prompt_req}],
+            ) as stream:
+                raw = stream.get_final_text().strip()
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw).strip()
+            thumb_prompts = _j.loads(raw)
+            if not isinstance(thumb_prompts, list) or len(thumb_prompts) == 0:
+                raise ValueError("Expected non-empty list")
+            thumb_prompts = [str(p) for p in thumb_prompts[:4]]
+        except Exception as _pe:
+            print(f"[Thumbnails] Claude prompt error: {_pe} — using fallback prompts")
+            thumb_prompts = [
+                f"Epic medieval battlefield at dusk, two armies clashing, dramatic low-angle shot, cinematic lighting, photorealistic, 16:9, no text",
+                f"Majestic gothic cathedral interior, golden light streaming through stained glass, medieval pilgrims, photorealistic, cinematic, no text",
+                f"Close-up portrait of a medieval knight in ornate armor, battle-worn face, dramatic rim lighting, photorealistic, no text",
+                f"Ancient illuminated manuscript and relics on a stone table, candlelight, dark moody atmosphere, photorealistic, no text",
+            ]
+        job["prompts"] = thumb_prompts
+        job["phase"]   = "images"
+        job["total"]   = len(thumb_prompts)
+
+        # ── Phase 2: DALL-E 3 generates each image ────────────────────────────
         from openai import OpenAI as _OAI
         oai = _OAI(api_key=config.OPENAI_API_KEY)
         urls = []
@@ -957,44 +972,49 @@ def api_thumbnails_generate(prod_id):
                 resp = oai.images.generate(
                     model="dall-e-3",
                     prompt=p,
-                    size="1792x1024",   # closest to 16:9 available in DALL-E 3
+                    size="1792x1024",
                     quality="hd",
                     n=1,
                 )
                 url = resp.data[0].url
                 urls.append(url)
-                _thumbnail_jobs[job_id]["done"] = i + 1
-                print(f"[DALL-E] {i+1}/{len(thumb_prompts)} done")
+                job["done"] = i + 1
+                print(f"[DALL-E] {i+1}/{len(thumb_prompts)} done prod={prod_id}")
             except Exception as _ie:
                 print(f"[DALL-E] image {i+1} error: {_ie}")
-                urls.append(None)   # placeholder so indices stay aligned
-                _thumbnail_jobs[job_id]["done"] = i + 1
+                urls.append(None)
+                job["done"] = i + 1
 
         real_urls = [u for u in urls if u]
         if real_urls:
-            _thumbnail_jobs[job_id].update(status="done", urls=real_urls)
+            job.update(status="done", urls=real_urls)
             database.upsert_task(prod_id, "thumbnails", "done",
-                                 result_text=_json.dumps({
+                                 result_text=_j.dumps({
                                      "urls":    real_urls,
                                      "prompts": thumb_prompts,
                                  }))
         else:
-            _thumbnail_jobs[job_id].update(
-                status="error",
-                error="Nenhuma imagem gerada — verifique créditos OpenAI / DALL-E 3",
-            )
+            job.update(status="error",
+                       error="Nenhuma imagem gerada — verifique créditos OpenAI / DALL-E 3")
+            database.upsert_task(prod_id, "thumbnails", "pending",
+                                 notes=job["error"])
 
-    threading.Thread(target=_generate_dalle, daemon=True).start()
-    return jsonify({"success": True, "job_id": job_id})
+    threading.Thread(target=_bg_thumbnails, daemon=True).start()
+    return jsonify({"queued": True})
 
 
-@app.route("/api/thumbnails/status/<job_id>")
-def api_thumbnails_status(job_id):
-    job = _thumbnail_jobs.get(job_id)
+@app.route("/api/productions/<int:prod_id>/tasks/thumbnails/status")
+def api_thumbnails_status(prod_id):
+    """Poll thumbnail generation progress keyed by prod_id."""
+    job = _thumbnail_jobs.get(prod_id)
     if not job:
-        return jsonify({"error": "Job não encontrado"}), 404
-    # Include progress fraction for the UI
-    total = job.get("total", len(job.get("prompts", []))) or 1
+        # No active job in memory — check DB for current task status
+        prod = database.get_production(prod_id)
+        if prod:
+            task = (prod.get("tasks") or {}).get("thumbnails", {})
+            return jsonify({"status": task.get("status", "pending"), "done": 0, "total": 4})
+        return jsonify({"status": "unknown"}), 404
+    total = job.get("total") or 4
     done  = job.get("done", 0)
     return jsonify({**job, "progress": f"{done}/{total}"})
 

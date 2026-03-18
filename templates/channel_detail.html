@@ -864,10 +864,18 @@
   // THUMBNAILS PANEL  (DALL-E 3)
   // ══════════════════════════════════════════════════════
   function renderThumbnailsPanel(prod) {
+    clearInterval(_thumbPollTimer);
     const tasks     = prod.tasks || {};
     const thumbTask = tasks.thumbnails || {};
     const body = document.getElementById('panelBody');
     const foot = document.getElementById('panelFooter');
+
+    // ── Running in background — auto-resume polling ──
+    if (thumbTask.status === 'in_progress') {
+      _showThumbProgress(0, 4, 'Aguardando progresso…');
+      startThumbPolling(prod.id);
+      return;
+    }
 
     let existingUrls = [], existingPrompts = [];
     if (thumbTask.result_text) {
@@ -929,9 +937,10 @@
     try {
       const res = await fetch(`/api/productions/${panelProdId}/tasks/thumbnails/generate`,
         { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' }).then(r => r.json());
-      if (res.success) {
-        _showThumbProgress(0, 4, 'Claude gerando prompts…');
-        startThumbPolling(panelProdId, res.job_id);
+      if (res.queued) {
+        await loadProductions();
+        const prod = productions.find(p => p.id === panelProdId);
+        if (prod) renderThumbnailsPanel(prod);  // sees in_progress → spinner + poll
       } else {
         showToast('❌ ' + (res.error || 'Erro'), true);
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-image"></i> Gerar 4 Thumbnails (DALL-E 3)'; }
@@ -945,11 +954,11 @@
       <div style="text-align:center;padding:2.5rem 1.5rem;color:var(--muted)">
         <i class="bi bi-image spinning" style="font-size:2.5rem;color:var(--purple)"></i>
         <div style="margin-top:1rem;font-weight:600;color:var(--text)">Gerando thumbnails com DALL-E 3…</div>
-        <div style="font-size:.82rem;margin-top:.3rem">${label}</div>
+        <div style="font-size:.82rem;margin-top:.3rem">${esc(label)}</div>
         <div style="margin-top:1.25rem;background:var(--border);border-radius:99px;height:6px;overflow:hidden">
-          <div style="background:var(--purple);height:100%;width:${pct}%;transition:width .4s ease;border-radius:99px"></div>
+          <div id="thumbBar" style="background:var(--purple);height:100%;width:${pct}%;transition:width .5s ease;border-radius:99px"></div>
         </div>
-        <div style="font-size:.78rem;margin-top:.5rem;color:var(--muted)">${done} / ${total} imagens</div>
+        <div id="thumbCount" style="font-size:.78rem;margin-top:.5rem;color:var(--muted)">${done} / ${total} imagens</div>
         <div style="margin-top:1rem;font-size:.78rem;color:var(--muted);
                     background:rgba(56,139,253,.08);border:1px solid rgba(56,139,253,.2);
                     border-radius:8px;padding:.5rem .9rem;display:inline-block">
@@ -961,20 +970,31 @@
       `<button class="btn-outline" onclick="closePanel()"><i class="bi bi-x"></i> Fechar painel</button>`;
   }
 
-  function startThumbPolling(prodId, jobId) {
+  // Poll by prod_id — no job_id needed, survives navigation
+  function startThumbPolling(prodId) {
     clearInterval(_thumbPollTimer);
     _thumbPollTimer = setInterval(async () => {
       try {
-        const data = await fetch(`/api/thumbnails/status/${jobId}`).then(r => r.json());
+        const data = await fetch(`/api/productions/${prodId}/tasks/thumbnails/status`).then(r => r.json());
         const done  = data.done  || 0;
         const total = data.total || 4;
-        const label = data.status === 'processing'
-          ? (done === 0 ? 'Claude gerando prompts…' : `Imagem ${done} de ${total} concluída`)
-          : '';
+        const phase = data.phase || 'images';
+        const label = phase === 'prompts'
+          ? 'Claude criando os prompts…'
+          : (done === 0 ? 'DALL-E iniciando…' : `Imagem ${done} de ${total} concluída`);
 
         if (panelProdId === prodId && panelMode === 'thumbnails') {
           if (data.status === 'processing') {
-            _showThumbProgress(done, total, label);
+            // Update bar in-place to avoid flicker; re-render if bar not found
+            const bar   = document.getElementById('thumbBar');
+            const count = document.getElementById('thumbCount');
+            if (bar && count) {
+              const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+              bar.style.width   = pct + '%';
+              count.textContent = `${done} / ${total} imagens — ${label}`;
+            } else {
+              _showThumbProgress(done, total, label);
+            }
           } else if (data.status === 'done') {
             clearInterval(_thumbPollTimer);
             showToast(`✅ ${data.urls?.length || total} thumbnails geradas!`, false);
@@ -990,7 +1010,7 @@
                </button>`;
           }
         } else {
-          // Panel not visible but job is running — just check for done to show toast
+          // Panel hidden — keep polling silently, toast when done
           if (data.status === 'done') {
             clearInterval(_thumbPollTimer);
             showToast('✅ Thumbnails prontas!', false);
