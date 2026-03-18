@@ -514,6 +514,9 @@ def api_script_generate(prod_id):
         style["system"]
         + f"\n\nLANGUAGE REQUIREMENT: You MUST write the entire script in {target_lang}."
         " Do not use any other language. Even technical terms must be adapted to {target_lang}."
+        "\n\nFORMAT REQUIREMENT: Output PLAIN TEXT only — the script must be ready to be read aloud."
+        " Absolutely NO markdown: no **, no __, no ##, no *, no bullet dashes, no backticks, no > blockquotes."
+        " Separate paragraphs with a blank line. That is the only allowed formatting."
     )
 
     # Optional: use existing transcription as factual reference
@@ -530,7 +533,10 @@ def api_script_generate(prod_id):
             "\nOriginal video transcription — use as factual reference for names, dates and events:\n"
             + transcription_text[:6000]
         )
-    user_parts.append(f"\nWrite the complete script now, entirely in {target_lang}.")
+    user_parts.append(
+        f"\nWrite the complete script now, entirely in {target_lang}."
+        " Plain text only — no markdown, no asterisks, no headers, no symbols. Just narration-ready prose."
+    )
     user_msg = "\n".join(user_parts)
 
     try:
