@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Produção — YT Analyzer</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <style>
+    :root {
+      --bg:      #0d1117; --surface: #161b22; --border:  #30363d;
+      --text:    #e6edf3; --muted:   #8b949e; --accent:  #f78166;
+      --green:   #3fb950; --yellow:  #d29922; --red:     #da3633; --blue: #388bfd;
+    }
+    * { box-sizing: border-box; }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; min-height:100vh; }
+    .app-header { background:var(--surface); border-bottom:1px solid var(--border); padding:.875rem 1.5rem; display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:100; }
+    .brand { display:flex; align-items:center; gap:.75rem; }
+    .brand-icon { width:34px; height:34px; background:#c00; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:1.1rem; }
+    .brand-name { font-size:1rem; font-weight:700; }
+    .brand-sub  { font-size:.7rem; color:var(--muted); }
+    .app-nav { background:var(--surface); border-bottom:1px solid var(--border); padding:0 1.5rem; display:flex; }
+    .nav-tab { display:inline-flex; align-items:center; gap:.4rem; padding:.65rem 1.1rem; font-size:.85rem; font-weight:500; color:var(--muted); text-decoration:none; border-bottom:2px solid transparent; transition:color .15s,border-color .15s; }
+    .nav-tab:hover { color:var(--text); }
+    .nav-tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+
+    /* ── Cards ── */
+    .channel-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1.25rem; display:flex; flex-direction:column; gap:.75rem; transition:border-color .15s, transform .15s; }
+    .channel-card:hover { border-color:var(--blue); transform:translateY(-2px); }
+    .channel-flag { font-size:2rem; }
+    .channel-name { font-size:1rem; font-weight:700; }
+    .channel-lang { font-size:.75rem; color:var(--muted); }
+    .stat-pill { display:inline-flex; align-items:center; gap:.3rem; background:rgba(56,139,253,.08); color:var(--blue); border-radius:20px; padding:.18rem .55rem; font-size:.73rem; font-weight:600; }
+    .stat-pill.warn { background:rgba(210,153,34,.1); color:var(--yellow); }
+
+    /* ── Buttons ── */
+    .btn-accent { background:var(--accent); border:none; color:#fff; padding:.5rem 1.1rem; border-radius:8px; font-size:.85rem; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:.4rem; transition:opacity .15s; }
+    .btn-accent:hover { opacity:.85; }
+    .btn-outline { background:transparent; border:1px solid var(--border); color:var(--muted); padding:.4rem .9rem; border-radius:8px; font-size:.82rem; cursor:pointer; display:inline-flex; align-items:center; gap:.4rem; transition:all .15s; }
+    .btn-outline:hover { border-color:var(--blue); color:var(--blue); }
+    .btn-danger { background:rgba(218,54,51,.12); border:1px solid rgba(218,54,51,.3); color:var(--red); padding:.35rem .8rem; border-radius:8px; font-size:.78rem; cursor:pointer; transition:all .15s; }
+    .btn-danger:hover { background:rgba(218,54,51,.25); }
+
+    /* ── Modal ── */
+    .modal-dark .modal-content { background:var(--surface); border:1px solid var(--border); color:var(--text); }
+    .modal-dark .modal-header, .modal-dark .modal-footer { border-color:var(--border); }
+    .modal-dark .btn-close { filter:invert(1); }
+    .form-dark { background:var(--bg); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:.45rem .875rem; font-size:.85rem; width:100%; outline:none; transition:border-color .15s; }
+    .form-dark:focus { border-color:var(--blue); }
+    .form-dark option { background:var(--surface); }
+    label.form-label { font-size:.8rem; color:var(--muted); margin-bottom:.3rem; }
+
+    /* ── Verify result box ── */
+    .verify-box { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:1rem; margin-top:.75rem; }
+    .verify-thumb { width:80px; border-radius:6px; }
+    .lang-ok   { color:var(--green); }
+    .lang-warn { color:var(--yellow); }
+
+    /* ── Toast ── */
+    #toast { position:fixed; bottom:1.5rem; right:1.5rem; z-index:9999; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:.875rem 1.25rem; font-size:.85rem; min-width:260px; box-shadow:0 8px 24px rgba(0,0,0,.5); display:none; }
+
+    a { text-decoration:none; color:inherit; }
+    .empty-state { text-align:center; padding:4rem 2rem; color:var(--muted); }
+    .empty-state .ei { font-size:3rem; margin-bottom:.75rem; }
+  </style>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="brand">
+    <div class="brand-icon">▶</div>
+    <div><div class="brand-name">YT Analyzer</div><div class="brand-sub">Idade Medieval &nbsp;·&nbsp; EN → PT</div></div>
+  </div>
+  <button class="btn-accent" onclick="openNewChannelModal()">
+    <i class="bi bi-plus-lg"></i> Novo Canal
+  </button>
+</header>
+
+<nav class="app-nav">
+  <a href="/" class="nav-tab"><i class="bi bi-bar-chart-line"></i> Analisador</a>
+  <a href="/transcriber" class="nav-tab"><i class="bi bi-mic"></i> Transcritor</a>
+  <a href="/channels" class="nav-tab active"><i class="bi bi-tv"></i> Produção</a>
+</nav>
+
+<main style="padding:1.5rem;max-width:1200px;margin:0 auto">
+  <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem">
+    <h5 style="margin:0;font-weight:700">📺 Meus Canais de Produção</h5>
+    <span id="channelCount" style="font-size:.8rem;color:var(--muted)"></span>
+  </div>
+
+  <div id="channelGrid" class="row g-3">
+    <div class="col-12 empty-state" id="emptyMsg">
+      <div class="ei">📺</div>
+      <div>Nenhum canal criado ainda</div>
+      <div style="margin-top:.5rem;font-size:.85rem">Clique em <strong>Novo Canal</strong> para começar</div>
+    </div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<!-- ── Modal: Novo Canal ── -->
+<div class="modal fade modal-dark" id="modalNewChannel" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">📺 Novo Canal</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Nome do canal *</label>
+          <input id="nc-name" type="text" class="form-dark" placeholder="Ex: História Medieval PT">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Idioma *</label>
+          <select id="nc-lang" class="form-dark" onchange="updateFlag()">
+            <option value="pt" data-flag="🇧🇷">🇧🇷 Português</option>
+            <option value="en" data-flag="🇺🇸">🇺🇸 English</option>
+            <option value="es" data-flag="🇪🇸">🇪🇸 Español</option>
+            <option value="de" data-flag="🇩🇪">🇩🇪 Deutsch</option>
+            <option value="fr" data-flag="🇫🇷">🇫🇷 Français</option>
+            <option value="it" data-flag="🇮🇹">🇮🇹 Italiano</option>
+            <option value="ro" data-flag="🇷🇴">🇷🇴 Română</option>
+            <option value="pl" data-flag="🇵🇱">🇵🇱 Polski</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Descrição (opcional)</label>
+          <textarea id="nc-desc" class="form-dark" rows="2" placeholder="Ex: Canal focado em Idade Média europeia"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-outline" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn-accent" onclick="createChannel()"><i class="bi bi-check-lg"></i> Criar Canal</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: Adicionar por URL ── -->
+<div class="modal fade modal-dark" id="modalAddUrl" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">🔗 Adicionar Vídeo por URL</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="d-flex gap-2 mb-2">
+          <input id="url-input" type="text" class="form-dark" placeholder="https://youtube.com/watch?v=...">
+          <button class="btn-accent" onclick="verifyUrl()" id="verifyBtn" style="white-space:nowrap">
+            <i class="bi bi-search"></i> Verificar
+          </button>
+        </div>
+        <div id="verifyResult" style="display:none"></div>
+        <div id="addForm" style="display:none;margin-top:1rem">
+          <div class="mb-3">
+            <label class="form-label">Título adaptado</label>
+            <input id="adapted-title" type="text" class="form-dark">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Adicionar ao canal</label>
+            <select id="url-channel-select" class="form-dark"></select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-outline" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn-accent" id="addToChannelBtn" style="display:none" onclick="addToChannel()">
+          <i class="bi bi-plus-lg"></i> Adicionar à Produção
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  const FLAG_MAP = { pt:'🇧🇷', en:'🇺🇸', es:'🇪🇸', de:'🇩🇪', fr:'🇫🇷', it:'🇮🇹', ro:'🇷🇴', pl:'🇵🇱' };
+  const LANG_NAME = { pt:'Português', en:'English', es:'Español', de:'Deutsch', fr:'Français', it:'Italiano', ro:'Română', pl:'Polski' };
+
+  let channels = [];
+  let verifiedVideo = null;
+  let targetChannelId = null;
+
+  // ── Load ──────────────────────────────────────────────────────────────────
+  async function loadChannels() {
+    channels = await fetch('/api/channels').then(r => r.json());
+    renderChannels();
+  }
+
+  function renderChannels() {
+    const grid = document.getElementById('channelGrid');
+    document.getElementById('channelCount').textContent = channels.length
+      ? `${channels.length} canal(is)` : '';
+
+    if (!channels.length) {
+      grid.innerHTML = `<div class="col-12 empty-state" id="emptyMsg"><div class="ei">📺</div>
+        <div>Nenhum canal criado ainda</div>
+        <div style="margin-top:.5rem;font-size:.85rem">Clique em <strong>Novo Canal</strong> para começar</div></div>`;
+      return;
+    }
+
+    grid.innerHTML = channels.map(ch => `
+      <div class="col-sm-6 col-lg-4">
+        <div class="channel-card">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between">
+            <div>
+              <div class="channel-flag">${ch.flag || FLAG_MAP[ch.language_code] || '🌐'}</div>
+              <div class="channel-name">${esc(ch.name)}</div>
+              <div class="channel-lang">${LANG_NAME[ch.language_code] || ch.language_code}</div>
+            </div>
+            <button class="btn-danger" onclick="deleteChannel(${ch.id},'${esc(ch.name)}')" title="Apagar canal">
+              <i class="bi bi-trash3"></i>
+            </button>
+          </div>
+          ${ch.description ? `<div style="font-size:.8rem;color:var(--muted)">${esc(ch.description)}</div>` : ''}
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+            <span class="stat-pill"><i class="bi bi-camera-video"></i> ${ch.production_count || 0} vídeos</span>
+            ${ch.pending_tasks > 0 ? `<span class="stat-pill warn"><i class="bi bi-clock"></i> ${ch.pending_tasks} tarefas pendentes</span>` : ''}
+          </div>
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:auto">
+            <a href="/channel/${ch.id}" class="btn-accent" style="flex:1;justify-content:center">
+              <i class="bi bi-folder2-open"></i> Abrir
+            </a>
+            <button class="btn-outline" onclick="openAddUrl(${ch.id})" style="flex:1;justify-content:center">
+              <i class="bi bi-link-45deg"></i> + URL
+            </button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  // ── Create channel ────────────────────────────────────────────────────────
+  function openNewChannelModal() {
+    new bootstrap.Modal(document.getElementById('modalNewChannel')).show();
+  }
+
+  function updateFlag() {}
+
+  async function createChannel() {
+    const name = document.getElementById('nc-name').value.trim();
+    const langSel = document.getElementById('nc-lang');
+    const lang = langSel.value;
+    const flag = FLAG_MAP[lang] || '🌐';
+    const desc = document.getElementById('nc-desc').value.trim();
+    if (!name) { showToast('⚠️ Informe o nome do canal', true); return; }
+    const res = await fetch('/api/channels', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name, language_code: lang, flag, description: desc }),
+    }).then(r => r.json());
+    if (res.success) {
+      bootstrap.Modal.getInstance(document.getElementById('modalNewChannel')).hide();
+      document.getElementById('nc-name').value = '';
+      document.getElementById('nc-desc').value = '';
+      showToast('✅ Canal criado!', false);
+      loadChannels();
+    } else {
+      showToast('❌ ' + (res.error || 'Erro'), true);
+    }
+  }
+
+  async function deleteChannel(id, name) {
+    if (!confirm(`Apagar o canal "${name}" e todos os seus vídeos em produção?`)) return;
+    await fetch(`/api/channels/${id}`, { method: 'DELETE' });
+    showToast('🗑️ Canal apagado', false);
+    loadChannels();
+  }
+
+  // ── Add by URL ────────────────────────────────────────────────────────────
+  function openAddUrl(channelId) {
+    targetChannelId = channelId;
+    document.getElementById('url-input').value = '';
+    document.getElementById('verifyResult').style.display = 'none';
+    document.getElementById('addForm').style.display = 'none';
+    document.getElementById('addToChannelBtn').style.display = 'none';
+    verifiedVideo = null;
+
+    // Populate channel select
+    const sel = document.getElementById('url-channel-select');
+    sel.innerHTML = channels.map(ch =>
+      `<option value="${ch.id}" ${ch.id == channelId ? 'selected' : ''}>${ch.flag || FLAG_MAP[ch.language_code] || ''} ${esc(ch.name)}</option>`
+    ).join('');
+
+    new bootstrap.Modal(document.getElementById('modalAddUrl')).show();
+  }
+
+  async function verifyUrl() {
+    const url = document.getElementById('url-input').value.trim();
+    if (!url) return;
+    const btn = document.getElementById('verifyBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+    const res = await fetch('/api/youtube/video-info', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ url }),
+    }).then(r => r.json());
+
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-search"></i> Verificar';
+
+    if (res.error) {
+      document.getElementById('verifyResult').style.display = '';
+      document.getElementById('verifyResult').innerHTML =
+        `<div style="color:var(--red);font-size:.85rem"><i class="bi bi-x-circle"></i> ${esc(res.error)}</div>`;
+      return;
+    }
+
+    verifiedVideo = res;
+    const langOk = !res.language || res.language.startsWith('en');
+    const langBadge = langOk
+      ? `<span class="lang-ok"><i class="bi bi-check-circle-fill"></i> Inglês (OK)</span>`
+      : `<span class="lang-warn"><i class="bi bi-exclamation-triangle-fill"></i> Idioma: ${esc(res.language)} — verifique antes de adicionar</span>`;
+
+    document.getElementById('verifyResult').style.display = '';
+    document.getElementById('verifyResult').innerHTML = `
+      <div class="verify-box d-flex gap-3 align-items-start">
+        ${res.thumbnail ? `<img src="${esc(res.thumbnail)}" class="verify-thumb">` : ''}
+        <div>
+          <div style="font-weight:600;font-size:.9rem">${esc(res.title)}</div>
+          <div style="font-size:.78rem;color:var(--muted);margin-top:.2rem">${esc(res.channel)}</div>
+          <div style="margin-top:.5rem;font-size:.82rem">${langBadge}</div>
+        </div>
+      </div>`;
+
+    // Pre-fill adapted title via translation
+    document.getElementById('addForm').style.display = '';
+    document.getElementById('addToChannelBtn').style.display = '';
+    document.getElementById('adapted-title').value = res.title; // will be updated by translation
+
+    // Auto-translate
+    const selLang = document.getElementById('url-channel-select').value;
+    const ch = channels.find(c => c.id == selLang) || channels.find(c => c.id == targetChannelId);
+    if (ch && ch.language_code !== 'en') {
+      fetch('https://api.mymemory.translated.net/get?q=' + encodeURIComponent(res.title) + '&langpair=en|' + ch.language_code)
+        .then(r => r.json())
+        .then(d => {
+          if (d.responseData?.translatedText)
+            document.getElementById('adapted-title').value = d.responseData.translatedText;
+        }).catch(() => {});
+    }
+  }
+
+  async function addToChannel() {
+    if (!verifiedVideo) return;
+    const channelId = parseInt(document.getElementById('url-channel-select').value);
+    const adaptedTitle = document.getElementById('adapted-title').value.trim();
+    const res = await fetch('/api/productions', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        channel_id:       channelId,
+        source_url:       verifiedVideo.url,
+        source_video_id:  verifiedVideo.video_id,
+        source_title:     verifiedVideo.title,
+        source_channel:   verifiedVideo.channel,
+        source_language:  verifiedVideo.language,
+        source_thumbnail: verifiedVideo.thumbnail,
+        adapted_title:    adaptedTitle,
+      }),
+    }).then(r => r.json());
+
+    if (res.success) {
+      bootstrap.Modal.getInstance(document.getElementById('modalAddUrl')).hide();
+      showToast('✅ Vídeo adicionado à produção!', false);
+      loadChannels();
+      // Open channel page
+      setTimeout(() => { window.location = `/channel/${channelId}`; }, 800);
+    } else {
+      showToast('❌ ' + (res.error || 'Erro'), true);
+    }
+  }
+
+  // ── Utils ─────────────────────────────────────────────────────────────────
+  function esc(s) {
+    return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function showToast(msg, isError) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.style.borderColor = isError ? 'var(--red)' : 'var(--green)';
+    t.style.display = 'block';
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => t.style.display = 'none', 4000);
+  }
+
+  loadChannels();
+</script>
+</body>
+</html>

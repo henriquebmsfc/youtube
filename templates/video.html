@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ video.title[:60] }} — YT Analyzer</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <style>
+    :root {
+      --bg:      #0d1117;
+      --surface: #161b22;
+      --border:  #30363d;
+      --text:    #e6edf3;
+      --muted:   #8b949e;
+      --accent:  #f78166;
+      --green:   #3fb950;
+      --yellow:  #d29922;
+      --red:     #da3633;
+      --blue:    #388bfd;
+    }
+    * { box-sizing: border-box; }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
+    a { color: inherit; text-decoration: none; }
+
+    /* Header */
+    .app-header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0.75rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .back-btn {
+      display: flex; align-items: center; gap: 0.4rem;
+      color: var(--muted); font-size: 0.88rem;
+      padding: 0.35rem 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      transition: all 0.15s;
+    }
+    .back-btn:hover { border-color: var(--blue); color: var(--blue); }
+
+    /* Video hero */
+    .hero-thumb {
+      width: 100%;
+      border-radius: 12px;
+      aspect-ratio: 16/9;
+      object-fit: cover;
+      background: #1a2233;
+    }
+    .btn-yt {
+      display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+      background: #c00; color: #fff; border: none;
+      border-radius: 8px; padding: 0.6rem 1.2rem;
+      font-size: 0.9rem; font-weight: 600; width: 100%; margin-top: 0.75rem;
+      transition: opacity 0.15s; cursor: pointer;
+    }
+    .btn-yt:hover { opacity: 0.85; }
+
+    /* Stats grid */
+    .stat-pill {
+      display: inline-flex; align-items: center; gap: 0.35rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.35rem 0.75rem;
+      font-size: 0.82rem;
+    }
+    .section-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+    }
+    .section-title {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+    }
+
+    /* Opportunity badge */
+    .opp-badge { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.7rem; border-radius: 20px; font-size: 0.82rem; font-weight: 600; }
+    .opp-high { background: rgba(63,185,80,0.15);  color: var(--green);  }
+    .opp-med  { background: rgba(210,153,34,0.15); color: var(--yellow); }
+    .opp-low  { background: rgba(218,54,51,0.15);  color: var(--red);    }
+
+    /* Translation cards */
+    .lang-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem;
+      margin-bottom: 0.75rem;
+      transition: border-color 0.15s;
+    }
+    .lang-card:hover { border-color: var(--blue); }
+    .lang-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; }
+    .lang-flag   { font-size: 1.4rem; }
+    .lang-name   { font-size: 0.82rem; font-weight: 600; color: var(--muted); }
+    .lang-title  {
+      font-size: 1rem; font-weight: 600; line-height: 1.35;
+      margin-bottom: 0.75rem; color: var(--text);
+    }
+    .lang-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+    .btn-sm-action {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      border-radius: 6px; padding: 0.3rem 0.7rem; font-size: 0.78rem; font-weight: 500;
+      cursor: pointer; transition: all 0.15s; border: 1px solid var(--border);
+      background: transparent; color: var(--muted);
+    }
+    .btn-sm-action:hover            { border-color: var(--blue); color: var(--blue); background: rgba(56,139,253,0.08); }
+    .btn-sm-action.btn-yt-link      { border-color: rgba(200,0,0,0.4); color: #ff4444; background: rgba(200,0,0,0.08); }
+    .btn-sm-action.btn-yt-link:hover{ background: rgba(200,0,0,0.15); }
+    .btn-sm-action.btn-comp         { border-color: rgba(63,185,80,0.4); color: var(--green); background: rgba(63,185,80,0.08); }
+    .btn-sm-action.btn-comp:hover   { background: rgba(63,185,80,0.15); }
+    .btn-sm-action:disabled         { opacity: 0.45; cursor: not-allowed; }
+
+    /* Competition results */
+    .comp-results { margin-top: 0.75rem; border-top: 1px solid var(--border); padding-top: 0.75rem; }
+    .comp-summary { font-size: 0.82rem; font-weight: 600; margin-bottom: 0.6rem; padding: 0.35rem 0.7rem; border-radius: 6px; display: inline-block; }
+    .comp-open    { background: rgba(63,185,80,0.12);  color: var(--green);  }
+    .comp-warn    { background: rgba(210,153,34,0.12); color: var(--yellow); }
+    .comp-danger  { background: rgba(218,54,51,0.12);  color: var(--red);    }
+    .comp-vid-row {
+      display: flex; gap: 0.6rem; align-items: flex-start;
+      padding: 0.45rem 0; border-bottom: 1px solid rgba(48,54,61,0.5);
+    }
+    .comp-vid-row:last-child { border-bottom: none; }
+    .comp-thumb { width: 64px; height: 36px; object-fit: cover; border-radius: 4px; flex-shrink: 0; background: #1a2233; }
+    .comp-vid-info  { flex: 1; min-width: 0; }
+    .comp-vid-title { font-size: 0.78rem; color: var(--text); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .comp-vid-ch    { font-size: 0.7rem; color: var(--muted); margin-top: 0.1rem; }
+    .sim-badge {
+      flex-shrink: 0; align-self: center;
+      font-size: 0.68rem; font-weight: 700;
+      padding: 0.15rem 0.45rem; border-radius: 10px; white-space: nowrap;
+    }
+    .sim-direct  { background: rgba(218,54,51,0.15);  color: var(--red);    }
+    .sim-related { background: rgba(210,153,34,0.15); color: var(--yellow); }
+    .sim-diff    { background: rgba(63,185,80,0.12);  color: var(--green);  }
+
+    /* Translate loading */
+    .translate-skeleton {
+      background: var(--border);
+      border-radius: 6px;
+      height: 1.1rem;
+      width: 70%;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+
+    /* Spinner */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spin { display: inline-block; animation: spin 0.7s linear infinite; }
+
+    /* Global check competition button */
+    .btn-global-comp {
+      background: rgba(63,185,80,0.1);
+      border: 1px solid rgba(63,185,80,0.35);
+      color: var(--green);
+      border-radius: 8px;
+      padding: 0.5rem 1.1rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .btn-global-comp:hover    { background: rgba(63,185,80,0.18); }
+    .btn-global-comp:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    /* Video title heading */
+    .video-main-title { font-size: 1.3rem; font-weight: 700; line-height: 1.35; margin-bottom: 0.75rem; }
+    .kw-tag { background: rgba(56,139,253,0.1); color: var(--blue); border-radius: 4px; padding: 0.13rem 0.45rem; font-size: 0.72rem; font-weight: 500; }
+
+    /* Add to channel button */
+    .btn-add-channel {
+      display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+      background: rgba(56,139,253,0.1); color: var(--blue);
+      border: 1px solid rgba(56,139,253,0.35);
+      border-radius: 8px; padding: 0.6rem 1.2rem;
+      font-size: 0.9rem; font-weight: 600; width: 100%; margin-top: 0.5rem;
+      transition: all 0.15s; cursor: pointer;
+    }
+    .btn-add-channel:hover { background: rgba(56,139,253,0.18); }
+
+    /* Modal dark */
+    .modal-dark .modal-content { background: var(--surface); border: 1px solid var(--border); color: var(--text); }
+    .modal-dark .modal-header, .modal-dark .modal-footer { border-color: var(--border); }
+    .modal-dark .btn-close { filter: invert(1); }
+    .form-dark { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: .45rem .875rem; font-size: .85rem; width: 100%; outline: none; transition: border-color .15s; }
+    .form-dark:focus { border-color: var(--blue); }
+    .form-dark option { background: var(--surface); }
+    label.dlabel { font-size: .8rem; color: var(--muted); margin-bottom: .3rem; display:block; }
+  </style>
+</head>
+<body>
+
+<header class="app-header">
+  <a class="back-btn" href="/"><i class="bi bi-arrow-left"></i> Voltar</a>
+  <span style="font-size:0.78rem;color:var(--muted)">YT Analyzer — Detalhe do Vídeo</span>
+  <span></span>
+</header>
+
+<main style="padding:1.5rem;max-width:1200px;margin:0 auto">
+  <div class="row g-4">
+
+    <!-- Left: thumbnail + YouTube button -->
+    <div class="col-md-4">
+      <img class="hero-thumb" src="{{ video.thumbnail_url }}" alt="{{ video.title }}">
+      <a href="{{ video.video_url }}" target="_blank" rel="noopener">
+        <button class="btn-yt"><i class="bi bi-play-circle-fill"></i> Ver no YouTube</button>
+      </a>
+      <button class="btn-add-channel" onclick="openAddToChannel()">
+        <i class="bi bi-tv"></i> Adicionar ao Canal
+      </button>
+    </div>
+
+    <!-- Right: video info -->
+    <div class="col-md-8">
+      <div class="section-box">
+        <div class="section-title">Informações do vídeo</div>
+        <div class="video-main-title">{{ video.title }}</div>
+
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;flex-wrap:wrap">
+          <span style="color:var(--muted);font-size:0.85rem"><i class="bi bi-person-circle"></i> {{ video.channel_name }}</span>
+          <span class="kw-tag">{{ video.keyword }}</span>
+        </div>
+
+        <!-- Stat pills -->
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1rem">
+          <span class="stat-pill"><i class="bi bi-eye"></i> <strong id="fViews"></strong></span>
+          <span class="stat-pill"><i class="bi bi-hand-thumbs-up"></i> <strong id="fLikes"></strong></span>
+          <span class="stat-pill"><i class="bi bi-chat"></i> <strong id="fComments"></strong></span>
+          {% if video.duration_seconds %}
+          <span class="stat-pill"><i class="bi bi-hourglass-split"></i> <strong id="fDuration"></strong></span>
+          {% endif %}
+          <span class="stat-pill"><i class="bi bi-clock"></i> <strong id="fAge"></strong></span>
+        </div>
+
+        <!-- Scores -->
+        <div style="display:flex;gap:0.75rem;flex-wrap:wrap">
+          <div>
+            <div style="font-size:0.72rem;color:var(--muted);margin-bottom:0.25rem">OPORTUNIDADE</div>
+            {% set s = video.opportunity_score | round | int %}
+            {% if s >= 65 %}
+              <span class="opp-badge opp-high">🟢 Alto · {{ s }}</span>
+            {% elif s >= 35 %}
+              <span class="opp-badge opp-med">🟡 Médio · {{ s }}</span>
+            {% else %}
+              <span class="opp-badge opp-low">🔴 Baixo · {{ s }}</span>
+            {% endif %}
+          </div>
+          <div>
+            <div style="font-size:0.72rem;color:var(--muted);margin-bottom:0.25rem">ENGAJAMENTO</div>
+            <span class="opp-badge" style="background:rgba(56,139,253,0.1);color:var(--blue)">
+              ⚡ {{ "%.2f"|format(video.engagement_score) }}%
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /row -->
+
+  <!-- Translation section -->
+  <div class="section-box mt-2">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.75rem;margin-bottom:1rem">
+      <div>
+        <div class="section-title" style="margin-bottom:0.2rem">🌍 Pesquisa de Tradução</div>
+        <div style="font-size:0.82rem;color:var(--muted)">
+          Título original: <em>"{{ video.title }}"</em>
+        </div>
+      </div>
+      <button class="btn-global-comp" id="compBtn" onclick="checkAllCompetition()">
+        <i class="bi bi-search"></i> Verificar concorrência em todas as línguas
+      </button>
+    </div>
+
+    <div id="langCards" class="row g-3">
+      {% for code, info in languages.items() %}
+      <div class="col-md-6" id="col-{{ code }}">
+        <div class="lang-card" id="card-{{ code }}">
+          <div class="lang-header">
+            <span class="lang-flag">{{ info.flag }}</span>
+            <span class="lang-name">{{ info.name }} ({{ code }})</span>
+          </div>
+          <div class="lang-title" id="title-{{ code }}">
+            <div class="translate-skeleton"></div>
+          </div>
+          <div class="lang-actions" id="actions-{{ code }}">
+            <!-- filled after translation loads -->
+          </div>
+          <div id="comp-{{ code }}"></div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+</main>
+
+<script>
+  const VIDEO_TITLE   = {{ video.title | tojson }};
+  const VIDEO_ID      = {{ video.video_id | tojson }};
+  const VIDEO_CHANNEL = {{ video.channel_name | tojson }};
+  const VIDEO_THUMB   = {{ video.thumbnail_url | tojson }};
+  const VIDEO_URL     = {{ video.video_url | tojson }};
+  const RAW_VIEWS     = {{ video.views }};
+  const RAW_LIKES     = {{ video.likes }};
+  const RAW_COMMENTS  = {{ video.comments }};
+  const DURATION_S    = {{ video.duration_seconds or 0 }};
+  const PUBLISHED     = {{ video.published_at | tojson }};
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function fmt(n) {
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+    if (n >= 1_000)     return (n / 1_000).toFixed(0) + 'K';
+    return String(n);
+  }
+  function fmtDur(s) {
+    if (!s) return '';
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    return h > 0
+      ? `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
+      : `${m}:${String(sec).padStart(2,'0')}`;
+  }
+  function timeAgo(iso) {
+    if (!iso) return '—';
+    const d = Math.floor((Date.now() - new Date(iso)) / 86400000);
+    if (d === 0) return 'Hoje';
+    if (d === 1) return '1 dia atrás';
+    if (d < 30)  return d + ' dias atrás';
+    const m = Math.floor(d / 30);
+    return m === 1 ? '1 mês atrás' : m + ' meses atrás';
+  }
+  function escHtml(s) {
+    return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function ytSearchUrl(q) {
+    return 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q);
+  }
+
+  // ── Fill stat pills ────────────────────────────────────────────────────────
+  document.getElementById('fViews').textContent    = fmt(RAW_VIEWS);
+  document.getElementById('fLikes').textContent    = fmt(RAW_LIKES);
+  document.getElementById('fComments').textContent = fmt(RAW_COMMENTS);
+  if (DURATION_S) document.getElementById('fDuration').textContent = fmtDur(DURATION_S);
+  document.getElementById('fAge').textContent      = timeAgo(PUBLISHED);
+
+  // ── State ─────────────────────────────────────────────────────────────────
+  const translations = {};  // code → translated text
+
+  // ── Load translations ─────────────────────────────────────────────────────
+  async function loadTranslations() {
+    try {
+      const res  = await fetch('/api/translate', {
+        method:  'POST',
+        headers: {'Content-Type': 'application/json'},
+        body:    JSON.stringify({text: VIDEO_TITLE}),
+      });
+      const data = await res.json();
+      for (const [code, info] of Object.entries(data)) {
+        if (!info.translated) continue;
+        translations[code] = info.translated;
+        document.getElementById(`title-${code}`).textContent = info.translated;
+        document.getElementById(`actions-${code}`).innerHTML = `
+          <button class="btn-sm-action btn-yt-link"
+                  onclick="window.open('${escHtml(ytSearchUrl(info.translated))}','_blank')">
+            <i class="bi bi-youtube"></i> Buscar no YouTube
+          </button>
+          <button class="btn-sm-action"
+                  onclick="copyText('${escHtml(info.translated)}', this)">
+            <i class="bi bi-clipboard"></i> Copiar
+          </button>
+        `;
+      }
+    } catch (e) {
+      console.error('Translation error:', e);
+    }
+  }
+
+  function copyText(text, btn) {
+    navigator.clipboard.writeText(text).then(() => {
+      const orig = btn.innerHTML;
+      btn.innerHTML = '<i class="bi bi-check-lg"></i> Copiado!';
+      btn.style.color = 'var(--green)';
+      setTimeout(() => { btn.innerHTML = orig; btn.style.color = ''; }, 1800);
+    });
+  }
+
+  // ── Check competition ─────────────────────────────────────────────────────
+  async function checkAllCompetition() {
+    if (Object.keys(translations).length === 0) {
+      // Wait up to 15s for translations to arrive
+      const btn = document.getElementById('compBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="bi bi-hourglass-split spin"></i> Aguardando traduções…';
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 500));
+        if (Object.keys(translations).length > 0) break;
+      }
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-search"></i> Verificar concorrência em todas as línguas';
+      if (Object.keys(translations).length === 0) {
+        alert('Traduções não carregaram — verifique sua conexão e recarregue a página.');
+        return;
+      }
+    }
+    const btn = document.getElementById('compBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split spin"></i> Verificando…';
+
+    try {
+      const res  = await fetch('/api/competition', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({translations}),
+      });
+      const data = await res.json();
+
+      for (const [code, result] of Object.entries(data)) {
+        const el = document.getElementById(`comp-${code}`);
+        if (!el) continue;
+
+        const maxSim   = result.max_sim  ?? 0;
+        const nDirect  = result.n_direct  ?? 0;
+        const nRelated = result.n_related ?? 0;
+        const videos   = result.videos    ?? [];
+
+        // Show API error if present
+        if (result.error) {
+          el.innerHTML = `<div class="comp-results"><span class="comp-summary comp-warn">⚠️ Erro: ${escHtml(result.error)}</span></div>`;
+          continue;
+        }
+
+        // Overall summary
+        let summaryClass, summaryText;
+        if (nDirect > 0) {
+          summaryClass = 'comp-danger';
+          summaryText  = `🔴 ${nDirect} vídeo(s) com título muito similar`;
+        } else if (nRelated > 0) {
+          summaryClass = 'comp-warn';
+          summaryText  = `🟡 ${nRelated} vídeo(s) com tema relacionado`;
+        } else if (videos.length === 0) {
+          summaryClass = 'comp-open';
+          summaryText  = '🟢 Nenhum resultado encontrado — mercado aberto!';
+        } else {
+          summaryClass = 'comp-open';
+          summaryText  = '🟢 Sem concorrência direta — resultados abaixo são diferentes';
+        }
+
+        // Per-video similarity badge (thresholds: 55 direct / 20 related)
+        function simBadge(s) {
+          if (s >= 55) return `<span class="sim-badge sim-direct">🔴 Muito similar ${s}%</span>`;
+          if (s >= 20) return `<span class="sim-badge sim-related">🟡 Relacionado ${s}%</span>`;
+          return          `<span class="sim-badge sim-diff">🟢 Diferente ${s}%</span>`;
+        }
+
+        const videosHtml = videos.map(v => `
+          <a href="${escHtml(v.url)}" target="_blank" rel="noopener" style="display:block">
+            <div class="comp-vid-row">
+              <img class="comp-thumb" src="${escHtml(v.thumb)}" alt="" onerror="this.style.display='none'">
+              <div class="comp-vid-info">
+                <div class="comp-vid-title">${escHtml(v.title)}</div>
+                <div class="comp-vid-ch">${escHtml(v.channel)}</div>
+              </div>
+              ${simBadge(v.similarity)}
+            </div>
+          </a>
+        `).join('');
+
+        el.innerHTML = `
+          <div class="comp-results">
+            <span class="comp-summary ${summaryClass}">${summaryText}</span>
+            ${videosHtml}
+          </div>
+        `;
+      }
+    } catch (e) {
+      alert('Erro ao verificar concorrência.');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-search"></i> Verificar concorrência em todas as línguas';
+    }
+  }
+
+  // ── Init ──────────────────────────────────────────────────────────────────
+  loadTranslations();
+
+  // ── Add to Channel ────────────────────────────────────────────────────────
+  async function openAddToChannel() {
+    // Load channels
+    const channels = await fetch('/api/channels').then(r => r.json());
+    const sel = document.getElementById('atc-channel');
+    if (!channels.length) {
+      alert('Crie pelo menos um canal primeiro em /channels');
+      return;
+    }
+    sel.innerHTML = channels.map(ch =>
+      `<option value="${ch.id}" data-lang="${ch.language_code}">${ch.flag || ''} ${ch.name}</option>`
+    ).join('');
+
+    // Pre-fill adapted title from translations (if already loaded)
+    document.getElementById('atc-title').value = VIDEO_TITLE;
+    updateAtcTranslation();
+
+    new bootstrap.Modal(document.getElementById('modalAddToChannel')).show();
+  }
+
+  function updateAtcTranslation() {
+    const sel  = document.getElementById('atc-channel');
+    const lang = sel.options[sel.selectedIndex]?.dataset.lang || 'pt';
+    const titleInput = document.getElementById('atc-title');
+    if (lang === 'en') {
+      titleInput.value = VIDEO_TITLE;
+      return;
+    }
+    fetch('https://api.mymemory.translated.net/get?q=' + encodeURIComponent(VIDEO_TITLE) + '&langpair=en|' + lang)
+      .then(r => r.json())
+      .then(d => {
+        if (d.responseData?.translatedText)
+          titleInput.value = d.responseData.translatedText;
+      }).catch(() => {});
+  }
+
+  async function submitAddToChannel() {
+    const channelId    = document.getElementById('atc-channel').value;
+    const adaptedTitle = document.getElementById('atc-title').value.trim();
+    if (!channelId) return;
+
+    const res = await fetch('/api/productions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        channel_id:       parseInt(channelId),
+        source_url:       VIDEO_URL,
+        source_video_id:  VIDEO_ID,
+        source_title:     VIDEO_TITLE,
+        source_channel:   VIDEO_CHANNEL,
+        source_language:  'en',
+        source_thumbnail: VIDEO_THUMB,
+        adapted_title:    adaptedTitle,
+      }),
+    }).then(r => r.json());
+
+    if (res.success) {
+      bootstrap.Modal.getInstance(document.getElementById('modalAddToChannel')).hide();
+      // Show success + link to channel
+      const sel = document.getElementById('atc-channel');
+      const chId = sel.value;
+      const chName = sel.options[sel.selectedIndex]?.text || 'canal';
+      if (confirm(`✅ Vídeo adicionado ao ${chName}!\n\nAbrir a página do canal agora?`)) {
+        window.location = `/channel/${chId}`;
+      }
+    } else {
+      alert('❌ Erro: ' + (res.error || 'desconhecido'));
+    }
+  }
+</script>
+
+<!-- ── Modal: Adicionar ao Canal ── -->
+<div class="modal fade modal-dark" id="modalAddToChannel" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">📺 Adicionar ao Canal</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="dlabel">Canal de destino</label>
+          <select id="atc-channel" class="form-dark" onchange="updateAtcTranslation()"></select>
+        </div>
+        <div class="mb-3">
+          <label class="dlabel">Título adaptado</label>
+          <input id="atc-title" type="text" class="form-dark" placeholder="Tradução do título…">
+          <div style="font-size:.72rem;color:var(--muted);margin-top:.3rem">Traduzido automaticamente — edite se necessário</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-sm-action" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn-sm-action btn-comp" onclick="submitAddToChannel()">
+          <i class="bi bi-plus-lg"></i> Adicionar à Produção
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

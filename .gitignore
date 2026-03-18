@@ -1,0 +1,46 @@
+# Ambiente virtual Python
+venv/
+.venv/
+env/
+
+# Bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Banco de dados local
+*.db
+*.sqlite
+*.sqlite3
+
+# Variáveis de ambiente (NUNCA subir ao repositório)
+.env
+
+# Claude (configurações locais)
+.claude/
+
+# Arquivos de áudio/vídeo gerados localmente
+*.mp3
+*.mp4
+*.wav
+*.webm
+*.m4a
+
+# Thumbnails baixadas
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.webp
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

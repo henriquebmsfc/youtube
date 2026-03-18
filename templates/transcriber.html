@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Transcritor — YT Analyzer</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <style>
+    :root {
+      --bg:      #0d1117;
+      --surface: #161b22;
+      --border:  #30363d;
+      --text:    #e6edf3;
+      --muted:   #8b949e;
+      --accent:  #f78166;
+      --green:   #3fb950;
+      --yellow:  #d29922;
+      --red:     #da3633;
+      --blue:    #388bfd;
+      --purple:  #bc8cff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100vh;
+    }
+
+    /* ── Header ──────────────────────────────────────────── */
+    .app-header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0.875rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .brand { display: flex; align-items: center; gap: 0.75rem; }
+    .brand-icon {
+      width: 34px; height: 34px;
+      background: #c00; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.1rem;
+    }
+    .brand-name { font-size: 1rem; font-weight: 700; }
+    .brand-sub  { font-size: 0.7rem; color: var(--muted); }
+
+    /* ── Nav tabs ────────────────────────────────────────── */
+    .app-nav {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 1.5rem;
+      display: flex;
+      gap: 0;
+    }
+    .nav-tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.65rem 1.1rem;
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--muted);
+      text-decoration: none;
+      border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .nav-tab:hover { color: var(--text); }
+    .nav-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* ── Cards ───────────────────────────────────────────── */
+    .card-dark {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+    }
+    .section-title {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+    }
+
+    /* ── Drop zone ───────────────────────────────────────── */
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: 10px;
+      padding: 2.5rem 1.5rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: var(--blue);
+      background: rgba(56,139,253,0.05);
+    }
+    .drop-zone .drop-icon { font-size: 2.5rem; margin-bottom: 0.75rem; }
+    .drop-zone .drop-hint { font-size: 0.82rem; color: var(--muted); margin-top: 0.4rem; }
+    .drop-zone.has-file { border-color: var(--green); background: rgba(63,185,80,0.05); }
+    .drop-zone.has-file .drop-main { color: var(--green); font-weight: 600; }
+
+    /* ── Form elements ───────────────────────────────────── */
+    .form-label-dark { font-size: 0.82rem; color: var(--muted); margin-bottom: 0.35rem; display: block; }
+    .select-dark, .input-dark {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 0.45rem 0.875rem;
+      font-size: 0.85rem;
+      width: 100%;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .select-dark:focus, .input-dark:focus { border-color: var(--blue); }
+    .select-dark option { background: var(--surface); }
+
+    /* ── Buttons ─────────────────────────────────────────── */
+    .btn-primary-dark {
+      background: var(--accent);
+      border: none;
+      color: #fff;
+      padding: 0.6rem 1.5rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: opacity 0.15s;
+    }
+    .btn-primary-dark:hover    { opacity: 0.85; }
+    .btn-primary-dark:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-outline-dark {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 0.45rem 1rem;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      transition: all 0.15s;
+    }
+    .btn-outline-dark:hover { border-color: var(--blue); color: var(--blue); }
+
+    /* ── Progress area ───────────────────────────────────── */
+    .progress-area {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-size: 0.88rem;
+    }
+    .progress-bar-wrap {
+      flex: 1;
+      background: var(--border);
+      border-radius: 4px;
+      height: 4px;
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 4px;
+      border-radius: 4px;
+      background: var(--accent);
+      transition: width 0.4s;
+    }
+
+    /* ── Result textarea ─────────────────────────────────── */
+    .result-area {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      font-size: 0.83rem;
+      color: var(--text);
+      width: 100%;
+      resize: vertical;
+      min-height: 300px;
+      outline: none;
+      font-family: 'Courier New', monospace;
+      line-height: 1.6;
+    }
+    .result-area:focus { border-color: var(--blue); }
+
+    /* ── Badge pills ─────────────────────────────────────── */
+    .badge-pill {
+      display: inline-flex; align-items: center; gap: 0.25rem;
+      padding: 0.2rem 0.6rem; border-radius: 20px;
+      font-size: 0.72rem; font-weight: 600;
+    }
+    .badge-green  { background: rgba(63,185,80,0.15);  color: var(--green); }
+    .badge-purple { background: rgba(188,140,255,0.15); color: var(--purple); }
+
+    /* ── Spinner ─────────────────────────────────────────── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinning { animation: spin 0.75s linear infinite; display: inline-block; }
+
+    /* ── Toast ───────────────────────────────────────────── */
+    #toast {
+      position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 9999;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 0.875rem 1.25rem;
+      font-size: 0.85rem; min-width: 260px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      display: none;
+    }
+
+    a { text-decoration: none; color: inherit; }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────────────────── -->
+<header class="app-header">
+  <div class="brand">
+    <div class="brand-icon">▶</div>
+    <div>
+      <div class="brand-name">YT Analyzer</div>
+      <div class="brand-sub">Idade Medieval &nbsp;·&nbsp; EN → PT</div>
+    </div>
+  </div>
+</header>
+
+<!-- ── Nav tabs ──────────────────────────────────────────────────────────────── -->
+<nav class="app-nav">
+  <a href="/" class="nav-tab"><i class="bi bi-bar-chart-line"></i> Analisador</a>
+  <a href="/transcriber" class="nav-tab active"><i class="bi bi-mic"></i> Transcritor</a>
+  <a href="/channels" class="nav-tab"><i class="bi bi-tv"></i> Produção</a>
+</nav>
+
+<!-- ── Main ────────────────────────────────────────────────────────────────── -->
+<main style="padding:1.5rem;max-width:900px;margin:0 auto">
+
+  <div class="row g-4">
+
+    <!-- ── Left: Upload + Config ── -->
+    <div class="col-md-5">
+
+      <!-- Drop zone -->
+      <div class="card-dark mb-3">
+        <div class="section-title">1. Arquivo de áudio / vídeo</div>
+        <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+          <div class="drop-icon" id="dropIcon">🎵</div>
+          <div class="drop-main" id="dropMain">Clique ou arraste o arquivo aqui</div>
+          <div class="drop-hint">MP3 · WAV · M4A · OGG · FLAC · MP4 · AVI · MOV</div>
+        </div>
+        <input type="file" id="fileInput" accept=".mp3,.wav,.m4a,.ogg,.flac,.mp4,.avi,.mov"
+               style="display:none" onchange="onFileSelect(this.files[0])">
+      </div>
+
+      <!-- Config -->
+      <div class="card-dark">
+        <div class="section-title">2. Configurações</div>
+
+        <div class="mb-3">
+          <label class="form-label-dark">Modelo Whisper</label>
+          <select id="modelSelect" class="select-dark">
+            <option value="tiny">tiny — Mais rápido</option>
+            <option value="base" selected>base — Balanceado ✓</option>
+            <option value="small">small — Boa qualidade</option>
+            <option value="medium">medium — Alta qualidade</option>
+            <option value="large">large — Melhor qualidade</option>
+          </select>
+          <div style="font-size:0.73rem;color:var(--muted);margin-top:0.35rem">
+            base ≈ 1h áudio em ~8 min &nbsp;·&nbsp; large ≈ 1h em ~60 min
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label-dark">Idioma do áudio</label>
+          <select id="langSelect" class="select-dark">
+            <option value="pt">Português</option>
+            <option value="en">Inglês</option>
+            <option value="es">Espanhol</option>
+            <option value="de">Alemão</option>
+            <option value="fr">Francês</option>
+            <option value="it">Italiano</option>
+            <option value="auto">Auto-detectar</option>
+          </select>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label-dark">Timestamps</label>
+          <select id="tsSelect" class="select-dark" onchange="toggleInterval()">
+            <option value="sim">Sim — mostrar horários</option>
+            <option value="nao">Não — só o texto</option>
+          </select>
+        </div>
+
+        <div class="mb-3" id="intervalRow">
+          <label class="form-label-dark">Intervalo de timestamps (segundos)</label>
+          <input id="intervalInput" type="number" class="input-dark" value="8" min="1" max="120">
+          <div style="font-size:0.73rem;color:var(--muted);margin-top:0.35rem">
+            Padrão: 8 segundos por bloco
+          </div>
+        </div>
+
+        <button class="btn-primary-dark w-100" id="startBtn" onclick="startTranscription()" disabled>
+          <i class="bi bi-play-fill"></i>
+          <span id="startBtnText">Selecione um arquivo primeiro</span>
+        </button>
+      </div>
+
+    </div>
+
+    <!-- ── Right: Result ── -->
+    <div class="col-md-7">
+      <div class="card-dark" style="height:100%">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+          <div class="section-title mb-0">3. Resultado</div>
+          <div id="resultBadges" style="display:none">
+            <span class="badge-pill badge-green" id="langBadge"></span>
+          </div>
+        </div>
+
+        <!-- Progress -->
+        <div id="progressArea" class="progress-area mb-3" style="display:none">
+          <i class="bi bi-arrow-clockwise spinning" style="color:var(--accent)"></i>
+          <div style="flex:1">
+            <div id="progressText" style="font-size:0.82rem;color:var(--muted);margin-bottom:0.4rem"></div>
+            <div class="progress-bar-wrap">
+              <div class="progress-bar-fill" id="progressBar" style="width:30%"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Error -->
+        <div id="errorArea" style="display:none;background:rgba(218,54,51,0.08);border:1px solid rgba(218,54,51,0.3);border-radius:8px;padding:0.875rem;font-size:0.85rem;color:var(--red);margin-bottom:0.75rem"></div>
+
+        <!-- Text area -->
+        <textarea id="resultText" class="result-area"
+                  placeholder="A transcrição aparecerá aqui após o processamento…"
+                  readonly></textarea>
+
+        <!-- Action buttons -->
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.75rem">
+          <button class="btn-outline-dark" onclick="copyResult()" id="copyBtn">
+            <i class="bi bi-clipboard"></i> Copiar
+          </button>
+          <button class="btn-outline-dark" onclick="saveResult()" id="saveBtn">
+            <i class="bi bi-download"></i> Salvar TXT
+          </button>
+          <button class="btn-outline-dark" onclick="clearResult()" style="margin-left:auto;border-color:rgba(218,54,51,0.4);color:var(--muted)">
+            <i class="bi bi-trash3"></i> Limpar
+          </button>
+        </div>
+
+        <!-- Info box (initial) -->
+        <div id="infoBox" style="margin-top:1.5rem;padding:1rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:0.8rem;color:var(--muted);line-height:1.6">
+          <strong style="color:var(--text)">Como usar:</strong><br>
+          1. Selecione um arquivo de áudio ou vídeo<br>
+          2. Escolha o modelo e o idioma<br>
+          3. Ative timestamps se quiser saber quando cada frase foi dita<br>
+          4. Clique em <strong style="color:var(--accent)">Iniciar Transcrição</strong><br><br>
+          <strong style="color:var(--text)">⚠️ Requisito:</strong> Whisper + FFmpeg precisam estar instalados.<br>
+          Execute <code style="background:rgba(255,255,255,0.07);padding:0.1rem 0.3rem;border-radius:3px">pip install openai-whisper</code> e instale o FFmpeg.
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+  let selectedFile = null;
+  let pollInterval  = null;
+  let currentJobId  = null;
+
+  // ── File handling ───────────────────────────────────────────────────────────
+  function onFileSelect(file) {
+    if (!file) return;
+    selectedFile = file;
+    const zone = document.getElementById('dropZone');
+    zone.classList.add('has-file');
+    document.getElementById('dropIcon').textContent = '✅';
+    document.getElementById('dropMain').textContent = file.name;
+
+    const btn = document.getElementById('startBtn');
+    btn.disabled = false;
+    document.getElementById('startBtnText').textContent = 'Iniciar Transcrição';
+  }
+
+  // Drag & drop
+  const dropZone = document.getElementById('dropZone');
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) onFileSelect(e.dataTransfer.files[0]);
+  });
+
+  function toggleInterval() {
+    document.getElementById('intervalRow').style.display =
+      document.getElementById('tsSelect').value === 'sim' ? '' : 'none';
+  }
+
+  // ── Transcription ───────────────────────────────────────────────────────────
+  async function startTranscription() {
+    if (!selectedFile) return;
+
+    // Reset UI
+    document.getElementById('errorArea').style.display  = 'none';
+    document.getElementById('resultText').value          = '';
+    document.getElementById('resultBadges').style.display = 'none';
+    document.getElementById('infoBox').style.display     = 'none';
+    document.getElementById('progressArea').style.display = '';
+    document.getElementById('progressText').textContent   = 'Enviando arquivo…';
+    document.getElementById('progressBar').style.width    = '10%';
+
+    const btn = document.getElementById('startBtn');
+    btn.disabled = true;
+    document.getElementById('startBtnText').textContent = 'Processando…';
+
+    // Build form data
+    const fd = new FormData();
+    fd.append('audio',      selectedFile);
+    fd.append('model',      document.getElementById('modelSelect').value);
+    fd.append('language',   document.getElementById('langSelect').value);
+    fd.append('timestamps', document.getElementById('tsSelect').value);
+    fd.append('interval',   document.getElementById('intervalInput').value);
+
+    try {
+      const res  = await fetch('/api/transcribe', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      currentJobId = data.job_id;
+      document.getElementById('progressBar').style.width = '30%';
+      pollInterval = setInterval(pollStatus, 1500);
+    } catch (err) {
+      showError('Erro ao enviar arquivo: ' + err.message);
+      resetBtn();
+    }
+  }
+
+  async function pollStatus() {
+    if (!currentJobId) return;
+    try {
+      const data = await fetch('/api/transcribe/status/' + currentJobId).then(r => r.json());
+
+      document.getElementById('progressText').textContent = data.progress || '…';
+
+      if (data.status === 'loading') {
+        document.getElementById('progressBar').style.width = '45%';
+      } else if (data.status === 'transcribing') {
+        document.getElementById('progressBar').style.width = '70%';
+      } else if (data.status === 'done') {
+        clearInterval(pollInterval);
+        document.getElementById('progressBar').style.width = '100%';
+        setTimeout(() => {
+          document.getElementById('progressArea').style.display = 'none';
+          showResult(data.result, data.detected_language);
+          resetBtn();
+        }, 500);
+      } else if (data.status === 'error') {
+        clearInterval(pollInterval);
+        showError(data.error || 'Erro desconhecido');
+        resetBtn();
+      }
+    } catch (_) { /* ignore transient errors */ }
+  }
+
+  function showResult(text, lang) {
+    document.getElementById('resultText').value = text || '(resultado vazio)';
+    document.getElementById('resultBadges').style.display = '';
+    document.getElementById('langBadge').textContent = '🌐 Idioma detectado: ' + (lang || '?');
+    showToast('✅ Transcrição concluída!', false);
+  }
+
+  function showError(msg) {
+    document.getElementById('progressArea').style.display = 'none';
+    const ea = document.getElementById('errorArea');
+    ea.style.display = '';
+    ea.innerHTML = '<i class="bi bi-exclamation-triangle-fill"></i> ' + escHtml(msg);
+  }
+
+  function resetBtn() {
+    const btn = document.getElementById('startBtn');
+    btn.disabled = !selectedFile;
+    document.getElementById('startBtnText').textContent = selectedFile ? 'Iniciar Transcrição' : 'Selecione um arquivo primeiro';
+  }
+
+  // ── Result actions ──────────────────────────────────────────────────────────
+  function copyResult() {
+    const text = document.getElementById('resultText').value.trim();
+    if (!text) { showToast('⚠️ Nada para copiar.', true); return; }
+    navigator.clipboard.writeText(text).then(() => showToast('📋 Copiado!', false));
+  }
+
+  function saveResult() {
+    const text = document.getElementById('resultText').value.trim();
+    if (!text) { showToast('⚠️ Nada para salvar.', true); return; }
+    const ts   = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const a    = document.createElement('a');
+    a.href     = URL.createObjectURL(blob);
+    a.download = 'transcricao_' + ts + '.txt';
+    a.click();
+  }
+
+  function clearResult() {
+    document.getElementById('resultText').value = '';
+    document.getElementById('resultBadges').style.display = 'none';
+    document.getElementById('errorArea').style.display    = 'none';
+    document.getElementById('infoBox').style.display      = '';
+  }
+
+  // ── Utils ───────────────────────────────────────────────────────────────────
+  function escHtml(s) {
+    return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function showToast(msg, isError) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.style.borderColor = isError ? 'var(--red)' : 'var(--green)';
+    t.style.display = 'block';
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => { t.style.display = 'none'; }, 4000);
+  }
+</script>
+</body>
+</html>
