@@ -525,13 +525,13 @@ def api_script_generate(prod_id):
     try:
         import anthropic as _anthropic
         client = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-        message = client.messages.create(
+        with client.messages.stream(
             model=CLAUDE_MODEL,
             max_tokens=min(4000, _model_max_tokens(CLAUDE_MODEL)),
             system="Você é um roteirista especialista em vídeos educativos de YouTube sobre história medieval. Cria roteiros envolventes, precisos e adaptados culturalmente para o público-alvo.",
             messages=[{"role": "user", "content": full_prompt}],
-        )
-        script_text = message.content[0].text
+        ) as stream:
+            script_text = stream.get_final_text()
         database.upsert_task(prod_id, "script", "done", result_text=script_text)
         return jsonify({"success": True, "script": script_text})
     except Exception as e:
@@ -810,13 +810,13 @@ def api_prompts_generate(prod_id):
         import anthropic as _anthropic
         client = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
         _max_tok = _model_max_tokens(CLAUDE_MODEL)
-        msg = client.messages.create(
+        with client.messages.stream(
             model=CLAUDE_MODEL,
             max_tokens=_max_tok,
             system=DOTTI_SYSTEM,
             messages=[{"role": "user", "content": user_msg}],
-        )
-        prompts_text = msg.content[0].text
+        ) as stream:
+            prompts_text = stream.get_final_text()
         database.upsert_task(prod_id, "prompts", "done", result_text=prompts_text)
         return jsonify({"success": True, "prompts": prompts_text})
     except Exception as e:
@@ -851,11 +851,11 @@ def api_thumbnails_generate(prod_id):
             "Return a JSON array of 4 strings, each a complete image generation prompt. "
             "No extra text, just the JSON array."
         )
-        msg = client.messages.create(
+        with client.messages.stream(
             model=CLAUDE_MODEL, max_tokens=1200,
             messages=[{"role": "user", "content": prompt_req}],
-        )
-        raw = msg.content[0].text.strip()
+        ) as stream:
+            raw = stream.get_final_text().strip()
         if raw.startswith("```"):
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw).strip()
