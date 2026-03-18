@@ -642,26 +642,34 @@ def api_audio_generate(prod_id):
         return jsonify({"error": "Gere o roteiro primeiro antes de gerar o áudio"}), 400
 
     body     = request.get_json(force=True)
-    voice_id = body.get("voice_id", "")
-    if not voice_id:
-        return jsonify({"error": "voice_id é obrigatório"}), 400
+    voice_id = "TumdjBNWanlT3ysvclWh"  # Peter — fixo
+    model_id = body.get("model_id", "eleven_turbo_v2_5")
+    speed    = float(body.get("speed",      0.9))
+    stab     = float(body.get("stability",  0.5))
+    sim      = float(body.get("similarity", 0.75))
 
     payload = {
-        "input":            script_text,
-        "voice_id":         voice_id,
-        "model_id":         body.get("model_id", "eleven_multilingual_v2"),
-        "speed":            float(body.get("speed",      1.0)),
-        "stability":        float(body.get("stability",  0.5)),
-        "similarity":       float(body.get("similarity", 0.75)),
+        "input":             script_text,
+        "voice_id":          voice_id,
+        "model_id":          model_id,
+        "speed":             speed,
+        "stability":         stab,
+        "similarity":        sim,
+        "style":             0.0,
         "use_speaker_boost": True,
     }
     try:
         r    = http_requests.post(f"{GENAIPRO_BASE}/labs/task", headers=_gp_headers(),
                                    json=payload, timeout=30)
         data = r.json()
-        task_id = data.get("task_id")
+        # API pode retornar 'task_id' ou 'id'
+        task_id = data.get("task_id") or data.get("id")
         if not task_id:
-            return jsonify({"error": "API não retornou task_id", "detail": str(data)}), 500
+            app.logger.error("GenAIPro /labs/task HTTP %s → %s", r.status_code, data)
+            return jsonify({
+                "error":  f"API retornou HTTP {r.status_code} sem task_id",
+                "detail": data,
+            }), 500
         database.upsert_task(prod_id, "audio", "in_progress",
                              result_text=_json.dumps({"task_id": task_id}))
         return jsonify({"success": True, "task_id": task_id})
