@@ -901,9 +901,10 @@ def api_thumbnails_generate(prod_id):
     if existing.get("status") == "processing":
         return jsonify({"queued": True, "already_running": True})
 
-    tasks       = prod.get("tasks") or {}
-    script_text = tasks.get("script", {}).get("result_text", "")
-    title       = prod.get("adapted_title") or prod.get("source_title", "")
+    tasks            = prod.get("tasks") or {}
+    script_text      = tasks.get("script", {}).get("result_text", "")
+    title            = prod.get("adapted_title") or prod.get("source_title", "")
+    source_thumbnail = (prod.get("source_thumbnail") or "").strip()
 
     # Mark in_progress in DB immediately so panel shows spinner on return
     database.upsert_task(prod_id, "thumbnails", "in_progress")
@@ -924,25 +925,74 @@ def api_thumbnails_generate(prod_id):
         job = _thumbnail_jobs[prod_id]
 
         # ── Phase 1: Claude generates 4 DALL-E prompts ────────────────────────
+        # Try to load the source video thumbnail as visual reference for 2 of the 4 prompts
         try:
             import anthropic as _anthropic
+            import base64 as _b64
             _ac = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-            prompt_req = (
-                f"Create 4 YouTube thumbnail image prompts for a medieval history video.\n"
-                f"Title: {title}\n"
-                + (f"Script excerpt: {script_text[:600]}\n" if script_text else "")
-                + "\nRules:\n"
-                "- Each prompt must describe a dramatically DIFFERENT visual concept\n"
-                "- Cover different aspects: e.g. battle scene, castle/landscape, character portrait, artifact/map\n"
-                "- Photorealistic, cinematic quality, 16:9 widescreen composition\n"
-                "- No text, logos, watermarks or letters in the image\n"
-                "- Write each prompt as a single, self-contained DALL-E 3 image generation prompt\n"
-                "- Be vivid and specific about lighting, mood, colors, camera angle\n"
-                "Return ONLY a JSON array of 4 strings. No extra text, no markdown."
-            )
+
+            # Build user content — image block (if available) + text instruction
+            user_content = []
+            has_ref_image = False
+
+            if source_thumbnail:
+                try:
+                    img_resp = http_requests.get(source_thumbnail, timeout=10)
+                    if img_resp.status_code == 200:
+                        ct = img_resp.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+                        if ct not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
+                            ct = "image/jpeg"
+                        img_b64 = _b64.standard_b64encode(img_resp.content).decode("utf-8")
+                        user_content.append({
+                            "type": "image",
+                            "source": {"type": "base64", "media_type": ct, "data": img_b64},
+                        })
+                        has_ref_image = True
+                        print(f"[Thumbnails] Source thumbnail loaded ({len(img_resp.content)//1024}KB)")
+                except Exception as _te:
+                    print(f"[Thumbnails] Could not load source thumbnail: {_te}")
+
+            if has_ref_image:
+                prompt_text = (
+                    f"You are a YouTube thumbnail design expert.\n"
+                    f"The image above is the thumbnail of the original English video.\n"
+                    f"I am producing an adapted version of this video titled: \"{title}\"\n"
+                    + (f"Script excerpt: {script_text[:400]}\n" if script_text else "")
+                    + "\nGenerate 4 DALL-E 3 image prompts for YouTube thumbnails:\n\n"
+                    "PROMPTS 1 & 2 — INSPIRED BY THE SOURCE THUMBNAIL:\n"
+                    "Carefully study the thumbnail's visual style, composition, mood, color palette "
+                    "and main visual elements. Adapt those same qualities to the new title. "
+                    "The result should feel like a natural evolution of the original design.\n\n"
+                    "PROMPTS 3 & 4 — COMPLETELY ORIGINAL:\n"
+                    "Ignore the source thumbnail. Create entirely different visual concepts "
+                    "that are creative, cinematic and highly clickable for the same video title.\n\n"
+                    "ALL 4 prompts must:\n"
+                    "- Be photorealistic, cinematic quality, 16:9 widescreen (1792x1024)\n"
+                    "- Contain NO text, logos, watermarks or letters whatsoever\n"
+                    "- Be vivid and specific about lighting, mood, colors, camera angle\n"
+                    "- Be a complete, self-contained DALL-E 3 image generation prompt\n\n"
+                    "Return ONLY a JSON array of 4 strings (prompts 1–4 in order). No extra text, no markdown."
+                )
+            else:
+                # No reference image — 4 original prompts
+                prompt_text = (
+                    f"Create 4 YouTube thumbnail image prompts for a medieval history video.\n"
+                    f"Title: {title}\n"
+                    + (f"Script excerpt: {script_text[:600]}\n" if script_text else "")
+                    + "\nRules:\n"
+                    "- Each prompt must describe a dramatically DIFFERENT visual concept\n"
+                    "- Cover different aspects: e.g. battle scene, castle/landscape, character portrait, artifact/map\n"
+                    "- Photorealistic, cinematic quality, 16:9 widescreen composition\n"
+                    "- No text, logos, watermarks or letters in the image\n"
+                    "- Be vivid and specific about lighting, mood, colors, camera angle\n"
+                    "Return ONLY a JSON array of 4 strings. No extra text, no markdown."
+                )
+
+            user_content.append({"type": "text", "text": prompt_text})
+
             with _ac.messages.stream(
                 model=CLAUDE_MODEL, max_tokens=1500,
-                messages=[{"role": "user", "content": prompt_req}],
+                messages=[{"role": "user", "content": user_content}],
             ) as stream:
                 raw = stream.get_final_text().strip()
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
@@ -951,17 +1001,19 @@ def api_thumbnails_generate(prod_id):
             if not isinstance(thumb_prompts, list) or len(thumb_prompts) == 0:
                 raise ValueError("Expected non-empty list")
             thumb_prompts = [str(p) for p in thumb_prompts[:4]]
+            print(f"[Thumbnails] {len(thumb_prompts)} prompts generated (ref_image={has_ref_image})")
         except Exception as _pe:
             print(f"[Thumbnails] Claude prompt error: {_pe} — using fallback prompts")
             thumb_prompts = [
-                f"Epic medieval battlefield at dusk, two armies clashing, dramatic low-angle shot, cinematic lighting, photorealistic, 16:9, no text",
-                f"Majestic gothic cathedral interior, golden light streaming through stained glass, medieval pilgrims, photorealistic, cinematic, no text",
-                f"Close-up portrait of a medieval knight in ornate armor, battle-worn face, dramatic rim lighting, photorealistic, no text",
-                f"Ancient illuminated manuscript and relics on a stone table, candlelight, dark moody atmosphere, photorealistic, no text",
+                "Epic medieval battlefield at dusk, two armies clashing, dramatic low-angle shot, cinematic lighting, photorealistic, 16:9, no text",
+                "Majestic gothic cathedral interior, golden light streaming through stained glass, medieval pilgrims, photorealistic, cinematic, no text",
+                "Close-up portrait of a medieval knight in ornate armor, battle-worn face, dramatic rim lighting, photorealistic, no text",
+                "Ancient illuminated manuscript and relics on a stone table, candlelight, dark moody atmosphere, photorealistic, no text",
             ]
-        job["prompts"] = thumb_prompts
-        job["phase"]   = "images"
-        job["total"]   = len(thumb_prompts)
+        job["prompts"]   = thumb_prompts
+        job["phase"]     = "images"
+        job["total"]     = len(thumb_prompts)
+        job["used_ref"]  = has_ref_image   # True if source thumbnail was used
 
         # ── Phase 2: DALL-E 3 generates each image ────────────────────────────
         from openai import OpenAI as _OAI
@@ -990,8 +1042,9 @@ def api_thumbnails_generate(prod_id):
             job.update(status="done", urls=real_urls)
             database.upsert_task(prod_id, "thumbnails", "done",
                                  result_text=_j.dumps({
-                                     "urls":    real_urls,
-                                     "prompts": thumb_prompts,
+                                     "urls":     real_urls,
+                                     "prompts":  thumb_prompts,
+                                     "used_ref": has_ref_image,
                                  }))
         else:
             job.update(status="error",
