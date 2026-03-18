@@ -483,57 +483,71 @@ def api_task_update(prod_id, task_type):
 
 @app.route("/api/productions/<int:prod_id>/tasks/script/generate", methods=["POST"])
 def api_script_generate(prod_id):
+    import random
+    import sys as _sys
+    import importlib as _importlib
+
     prod = database.get_production(prod_id)
     if not prod:
         return jsonify({"error": "Produção não encontrada"}), 404
 
     channel = database.get_channel(prod["channel_id"])
-    lang_name = channel["name"] if channel else "Português"
     lang_code = channel["language_code"] if channel else "pt"
 
-    # Language name map
+    # Full language names for the model
     _lang_names = {
-        "pt": "Português", "en": "English", "es": "Español",
-        "de": "Deutsch", "fr": "Français", "it": "Italiano",
-        "ro": "Română", "pl": "Polski",
+        "pt": "Portuguese", "en": "English", "es": "Spanish",
+        "de": "German",     "fr": "French",  "it": "Italian",
+        "ro": "Romanian",   "pl": "Polish",
     }
     target_lang = _lang_names.get(lang_code, lang_code)
 
-    # Optional: include existing transcription
+    # Load styles (reload each time so edits to the file take effect without restart)
+    _styles_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts", "script_styles.py")
+    _spec = _importlib.util.spec_from_file_location("script_styles", _styles_path)
+    _mod  = _importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    style = random.choice(_mod.SCRIPT_STYLES)
+
+    # System prompt = chosen style + hard language requirement
+    system_prompt = (
+        style["system"]
+        + f"\n\nLANGUAGE REQUIREMENT: You MUST write the entire script in {target_lang}."
+        " Do not use any other language. Even technical terms must be adapted to {target_lang}."
+    )
+
+    # Optional: use existing transcription as factual reference
     existing_ts = (prod.get("tasks") or {}).get("transcription", {})
     transcription_text = existing_ts.get("result_text", "") if existing_ts else ""
 
-    prompt_parts = [
-        f"Crie um roteiro completo em {target_lang} para um vídeo de YouTube sobre história medieval.",
-        f"\nTítulo original (em inglês): \"{prod['source_title']}\"",
-        f"Título adaptado ({target_lang}): \"{prod['adapted_title']}\"",
-        f"Canal de origem: {prod['source_channel']}",
+    # User message = topic context (the variable part)
+    user_parts = [
+        f'Topic: "{prod["adapted_title"]}"',
+        f'(Original English video: "{prod["source_title"]}" from channel: {prod["source_channel"]})',
     ]
     if transcription_text:
-        prompt_parts.append(f"\nTranscrição do vídeo original:\n{transcription_text[:6000]}")
-    prompt_parts.append(
-        "\n\nO roteiro deve ter:\n"
-        "- Introdução chamativa (gancho nos primeiros 30 segundos)\n"
-        "- Desenvolvimento com informações históricas precisas e bem explicadas\n"
-        "- Conclusão com call-to-action (curtir, inscrever, comentar)\n"
-        "- Indicações de tempo estimado de narração por seção\n"
-        "- Tom educativo mas envolvente, acessível ao público geral\n"
-        "Escreva o roteiro completo pronto para ser gravado."
-    )
-    full_prompt = "\n".join(prompt_parts)
+        user_parts.append(
+            "\nOriginal video transcription — use as factual reference for names, dates and events:\n"
+            + transcription_text[:6000]
+        )
+    user_parts.append(f"\nWrite the complete script now, entirely in {target_lang}.")
+    user_msg = "\n".join(user_parts)
 
     try:
         import anthropic as _anthropic
         client = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
         with client.messages.stream(
             model=CLAUDE_MODEL,
-            max_tokens=min(4000, _model_max_tokens(CLAUDE_MODEL)),
-            system="Você é um roteirista especialista em vídeos educativos de YouTube sobre história medieval. Cria roteiros envolventes, precisos e adaptados culturalmente para o público-alvo.",
-            messages=[{"role": "user", "content": full_prompt}],
+            max_tokens=min(8000, _model_max_tokens(CLAUDE_MODEL)),
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_msg}],
         ) as stream:
             script_text = stream.get_final_text()
-        database.upsert_task(prod_id, "script", "done", result_text=script_text)
-        return jsonify({"success": True, "script": script_text})
+        database.upsert_task(prod_id, "script", "done",
+                             result_text=script_text,
+                             notes=f"Style: {style['name']} | Lang: {target_lang}")
+        print(f"[Script] prod={prod_id} style='{style['name']}' lang={target_lang} tokens≈{len(script_text)//4}")
+        return jsonify({"success": True, "script": script_text, "style": style["name"]})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

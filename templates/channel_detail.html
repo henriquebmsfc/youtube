@@ -390,17 +390,28 @@
     const body = document.getElementById('panelBody');
     const foot = document.getElementById('panelFooter');
 
+    // Show style badge if we know which style was used
+    const styleBadge = task.notes
+      ? `<span style="display:inline-block;margin-bottom:.75rem;padding:.2rem .6rem;border-radius:20px;
+                      font-size:.72rem;font-weight:600;background:rgba(188,140,255,.15);color:var(--purple);
+                      border:1px solid rgba(188,140,255,.3)">
+           🎭 ${esc(task.notes)}
+         </span><br>`
+      : '';
+
     if (task.result_text) {
-      body.innerHTML = `<textarea id="scriptArea" class="panel-ta">${esc(task.result_text)}</textarea>`;
+      body.innerHTML = styleBadge + `<textarea id="scriptArea" class="panel-ta">${esc(task.result_text)}</textarea>`;
     } else {
       body.innerHTML = `<div class="empty-state"><div class="ei">📝</div>
         <div>Nenhum roteiro gerado ainda</div>
-        <div style="margin-top:.5rem;font-size:.85rem;color:var(--muted)">Clique em <strong>Gerar com IA</strong></div>
+        <div style="margin-top:.5rem;font-size:.85rem;color:var(--muted)">
+          Clique em <strong>Gerar com IA</strong> — 1 de 4 estilos será escolhido aleatoriamente
+        </div>
       </div>`;
     }
     foot.innerHTML = `
       <button class="btn-accent" id="genScriptBtn" onclick="generateScript()">
-        <i class="bi bi-stars"></i> ${task.result_text ? 'Regerar com IA' : 'Gerar com IA'}
+        <i class="bi bi-stars"></i> ${task.result_text ? 'Regerar com IA (novo estilo)' : 'Gerar com IA'}
       </button>
       ${task.result_text ? `
         <button class="btn-outline" onclick="copyPanelText('scriptArea')"><i class="bi bi-clipboard"></i> Copiar</button>
@@ -424,7 +435,8 @@
       const res = await fetch(`/api/productions/${panelProdId}/tasks/script/generate`,
         { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' }).then(r => r.json());
       if (res.success) {
-        showToast('✅ Roteiro gerado!', false);
+        const styleLabel = res.style ? ` — estilo: ${res.style}` : '';
+        showToast(`✅ Roteiro gerado${styleLabel}!`, false);
         await loadProductions();
         const prod = productions.find(p => p.id === panelProdId);
         if (prod) renderScriptPanel(prod);
