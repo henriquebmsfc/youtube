@@ -685,55 +685,114 @@ def api_audio_status(prod_id, task_id):
                                   headers=_gp_headers(), timeout=10)
         data = r.json()
         if data.get("status") == "completed":
-            mp3_url = data.get("result", "")
+            mp3_url  = data.get("result", "")
+            srt_url  = data.get("subtitle", "")
             database.upsert_task(prod_id, "audio", "done",
-                                 result_text=_json.dumps({"task_id": task_id, "audio_url": mp3_url}))
+                                 result_text=_json.dumps({
+                                     "task_id":      task_id,
+                                     "audio_url":    mp3_url,
+                                     "subtitle_url": srt_url,
+                                 }))
         return jsonify(data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
-# ── Auto-transcription from audio URL ─────────────────────────────────────────
+# ── SRT → blocos de 8s (Veo3 Flow) ────────────────────────────────────────────
+
+def _srt_to_blocks(srt_text: str, interval: int = 8) -> str:
+    """Converte SRT em blocos de N segundos, mesmo formato do Whisper."""
+    import re
+    blocks: dict = {}
+    pattern = re.compile(
+        r"\d+\s*\n(\d+):(\d+):(\d+)[,.:](\d+)\s*-->\s*(\d+):(\d+):(\d+)[,.:](\d+)\s*\n([\s\S]*?)(?=\n\n|\Z)",
+        re.MULTILINE,
+    )
+    for m in pattern.finditer(srt_text.strip() + "\n\n"):
+        h0, m0, s0, ms0 = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+        start = h0 * 3600 + m0 * 60 + s0 + ms0 / 1000
+        text  = m.group(9).strip().replace("\n", " ")
+        if not text:
+            continue
+        idx = int(start // interval)
+        blocks.setdefault(idx, []).append(text)
+
+    if not blocks:
+        return ""
+
+    out = ""
+    for n, bi in enumerate(sorted(blocks), 1):
+        t0   = _fmt_time(bi * interval)
+        t1   = _fmt_time((bi + 1) * interval)
+        line = " ".join(blocks[bi]).strip()
+        if line:
+            out += f"{n}: {t0} até {t1} {line}\n\n"
+    total = len(blocks)
+    out  += f"\n{'='*60}\nTotal: {total} blocos de {interval} segundos cada\n{'='*60}"
+    return out.strip()
+
+
+# ── Auto-transcrição: usa SRT da GenAIPro (sem Whisper) ───────────────────────
 
 @app.route("/api/productions/<int:prod_id>/tasks/transcription/auto", methods=["POST"])
 def api_transcription_auto(prod_id):
-    import json as _json, time as _time
+    import json as _json
     prod = database.get_production(prod_id)
     if not prod:
         return jsonify({"error": "Produção não encontrada"}), 404
 
     try:
         audio_data = _json.loads((prod.get("tasks") or {}).get("audio", {}).get("result_text", "{}"))
-        audio_url  = audio_data.get("audio_url", "")
     except Exception:
-        audio_url = ""
-    if not audio_url:
+        audio_data = {}
+
+    if not audio_data.get("audio_url"):
         return jsonify({"error": "Gere o áudio primeiro"}), 400
 
-    channel   = database.get_channel(prod["channel_id"])
-    lang_code = (channel or {}).get("language_code", "pt")
+    srt_url     = audio_data.get("subtitle_url", "")
+    task_id_a   = audio_data.get("task_id", "")
+
+    # Se subtitle_url não foi salvo (áudio gerado antes da atualização), busca na API
+    if not srt_url and task_id_a:
+        try:
+            r = http_requests.get(f"{GENAIPRO_BASE}/labs/task/{task_id_a}",
+                                  headers=_gp_headers(), timeout=10)
+            d = r.json()
+            srt_url = d.get("subtitle", "")
+            if srt_url:
+                audio_data["subtitle_url"] = srt_url
+                database.upsert_task(prod_id, "audio", "done",
+                                     result_text=_json.dumps(audio_data))
+        except Exception:
+            pass
+
+    if not srt_url:
+        return jsonify({"error": "Legenda SRT não disponível. Tente regerar o áudio."}), 400
 
     job_id = str(uuid.uuid4())
     _transcription_jobs[job_id] = {
-        "status": "pending", "progress": "Baixando áudio…",
+        "status": "pending", "progress": "Baixando legenda…",
         "result": None, "error": None, "detected_language": None,
     }
 
     def _run():
         try:
-            resp = http_requests.get(audio_url, timeout=120)
-            tmp  = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-            tmp.write(resp.content)
-            tmp.close()
-            _run_transcription(job_id, tmp.name, "base", lang_code, True, 8)
-            # Wait for Whisper to finish (max 10 min)
-            for _ in range(600):
-                _time.sleep(1)
-                if _transcription_jobs[job_id]["status"] in ("done", "error"):
-                    break
-            if _transcription_jobs[job_id]["status"] == "done":
-                database.upsert_task(prod_id, "transcription", "done",
-                                     result_text=_transcription_jobs[job_id]["result"])
+            _transcription_jobs[job_id]["progress"] = "Baixando SRT da GenAIPro…"
+            resp = http_requests.get(srt_url, timeout=30)
+            resp.raise_for_status()
+
+            _transcription_jobs[job_id]["progress"] = "Convertendo em blocos de 8s…"
+            result_text = _srt_to_blocks(resp.text, interval=8)
+
+            if result_text:
+                database.upsert_task(prod_id, "transcription", "done", result_text=result_text)
+                _transcription_jobs[job_id].update(
+                    status="done", progress="Concluído!", result=result_text
+                )
+            else:
+                _transcription_jobs[job_id].update(
+                    status="error", error="SRT vazio ou formato não reconhecido"
+                )
         except Exception as exc:
             _transcription_jobs[job_id].update(status="error", error=str(exc))
 
