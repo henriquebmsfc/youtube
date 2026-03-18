@@ -523,19 +523,27 @@ def api_script_generate(prod_id):
     existing_ts = (prod.get("tasks") or {}).get("transcription", {})
     transcription_text = existing_ts.get("result_text", "") if existing_ts else ""
 
-    # User message = topic context (the variable part)
+    # User message = exact video identity (not a "topic" — the precise video to be produced)
     user_parts = [
-        f'Topic: "{prod["adapted_title"]}"',
-        f'(Original English video: "{prod["source_title"]}" from channel: {prod["source_channel"]})',
+        f'You are writing the complete voiceover script for a YouTube video.',
+        f'',
+        f'VIDEO TITLE (exact): "{prod["adapted_title"]}"',
+        f'',
+        f'This title is a promise to the viewer. The script must deliver EXACTLY what this title says'
+        f' — not a general overview of the theme, but the specific story, event, or analysis'
+        f' that the title describes. Every paragraph must serve this exact title.',
+        f'',
+        f'Reference (original English video with the same subject): "{prod["source_title"]}"'
+        f' by {prod["source_channel"]}',
     ]
     if transcription_text:
         user_parts.append(
-            "\nOriginal video transcription — use as factual reference for names, dates and events:\n"
-            + transcription_text[:6000]
+            "\nOriginal video transcription — use as the primary factual source for names, dates,"
+            " events and narrative structure:\n" + transcription_text[:6000]
         )
     user_parts.append(
-        f"\nWrite the complete script now, entirely in {target_lang}."
-        " Plain text only — no markdown, no asterisks, no headers, no symbols. Just narration-ready prose."
+        f"\nWrite the full script now, in {target_lang}."
+        " Plain text only — no markdown, no asterisks, no headers, no symbols. Narration-ready prose."
     )
     user_msg = "\n".join(user_parts)
 
