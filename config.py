@@ -13,6 +13,11 @@ YOUTUBE_API_KEY   = os.getenv("YOUTUBE_API_KEY",   "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 GENAIPRO_API_KEY  = os.getenv("GENAIPRO_API_KEY",  "")
 
+# ── Modelo Claude ─────────────────────────────────────────────────
+# Padrão: claude-sonnet-4-5 (64k tokens de saída)
+# Pode ser sobrescrito via variável de ambiente no Railway
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5")
+
 # ── Voz padrão TTS ────────────────────────────────────────────────
 DEFAULT_VOICE_ID  = os.getenv("DEFAULT_VOICE_ID", "douDhHvfoViWmZth0cUX")   # Peter
 
