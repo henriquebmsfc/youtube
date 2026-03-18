@@ -110,6 +110,7 @@ _LANG_MAP = {
 }
 
 _thumbnail_jobs: dict = {}   # job_id → {status, urls, error, prompt}
+_claude_jobs:    dict = {}   # job_id → {prod_id, task_type, status, error, style}
 
 def _gp_headers():
     return {"Authorization": f"Bearer {config.GENAIPRO_API_KEY}"}
@@ -481,10 +482,32 @@ def api_task_update(prod_id, task_type):
     return jsonify({"success": True})
 
 
+def _bg_script(job_id, prod_id, system_prompt, user_msg, style_name, target_lang):
+    """Background thread: calls Claude and saves the script to DB."""
+    try:
+        import anthropic as _anthropic
+        client = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        with client.messages.stream(
+            model=CLAUDE_MODEL,
+            max_tokens=min(8000, _model_max_tokens(CLAUDE_MODEL)),
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_msg}],
+        ) as stream:
+            script_text = stream.get_final_text()
+        database.upsert_task(prod_id, "script", "done",
+                             result_text=script_text,
+                             notes=f"Style: {style_name} | Lang: {target_lang}")
+        _claude_jobs[job_id].update(status="done", style=style_name)
+        print(f"[Script BG] prod={prod_id} style='{style_name}' lang={target_lang} tokens≈{len(script_text)//4}")
+    except Exception as exc:
+        database.upsert_task(prod_id, "script", "pending", notes=f"Erro: {exc}")
+        _claude_jobs[job_id].update(status="error", error=str(exc))
+        print(f"[Script BG] prod={prod_id} error: {exc}")
+
+
 @app.route("/api/productions/<int:prod_id>/tasks/script/generate", methods=["POST"])
 def api_script_generate(prod_id):
     import random
-    import sys as _sys
     import importlib as _importlib
 
     prod = database.get_production(prod_id)
@@ -494,7 +517,6 @@ def api_script_generate(prod_id):
     channel = database.get_channel(prod["channel_id"])
     lang_code = channel["language_code"] if channel else "pt"
 
-    # Full language names for the model
     _lang_names = {
         "pt": "Portuguese", "en": "English", "es": "Spanish",
         "de": "German",     "fr": "French",  "it": "Italian",
@@ -502,14 +524,13 @@ def api_script_generate(prod_id):
     }
     target_lang = _lang_names.get(lang_code, lang_code)
 
-    # Load styles (reload each time so edits to the file take effect without restart)
+    # Load styles (hot-reload: edits take effect without restart)
     _styles_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts", "script_styles.py")
     _spec = _importlib.util.spec_from_file_location("script_styles", _styles_path)
     _mod  = _importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
     style = random.choice(_mod.SCRIPT_STYLES)
 
-    # System prompt = chosen style + hard language requirement
     system_prompt = (
         style["system"]
         + f"\n\nLANGUAGE REQUIREMENT: You MUST write the entire script in {target_lang}."
@@ -519,20 +540,18 @@ def api_script_generate(prod_id):
         " Separate paragraphs with a blank line. That is the only allowed formatting."
     )
 
-    # Optional: use existing transcription as factual reference
     existing_ts = (prod.get("tasks") or {}).get("transcription", {})
     transcription_text = existing_ts.get("result_text", "") if existing_ts else ""
 
-    # User message = exact video identity (not a "topic" — the precise video to be produced)
     user_parts = [
-        f'You are writing the complete voiceover script for a YouTube video.',
-        f'',
+        'You are writing the complete voiceover script for a YouTube video.',
+        '',
         f'VIDEO TITLE (exact): "{prod["adapted_title"]}"',
-        f'',
-        f'This title is a promise to the viewer. The script must deliver EXACTLY what this title says'
-        f' — not a general overview of the theme, but the specific story, event, or analysis'
-        f' that the title describes. Every paragraph must serve this exact title.',
-        f'',
+        '',
+        'This title is a promise to the viewer. The script must deliver EXACTLY what this title says'
+        ' — not a general overview of the theme, but the specific story, event, or analysis'
+        ' that the title describes. Every paragraph must serve this exact title.',
+        '',
         f'Reference (original English video with the same subject): "{prod["source_title"]}"'
         f' by {prod["source_channel"]}',
     ]
@@ -547,23 +566,27 @@ def api_script_generate(prod_id):
     )
     user_msg = "\n".join(user_parts)
 
-    try:
-        import anthropic as _anthropic
-        client = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-        with client.messages.stream(
-            model=CLAUDE_MODEL,
-            max_tokens=min(8000, _model_max_tokens(CLAUDE_MODEL)),
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_msg}],
-        ) as stream:
-            script_text = stream.get_final_text()
-        database.upsert_task(prod_id, "script", "done",
-                             result_text=script_text,
-                             notes=f"Style: {style['name']} | Lang: {target_lang}")
-        print(f"[Script] prod={prod_id} style='{style['name']}' lang={target_lang} tokens≈{len(script_text)//4}")
-        return jsonify({"success": True, "script": script_text, "style": style["name"]})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+    # Mark in_progress immediately and launch background thread
+    job_id = str(uuid.uuid4())[:12]
+    _claude_jobs[job_id] = {"prod_id": prod_id, "task_type": "script", "status": "running", "error": None, "style": None}
+    database.upsert_task(prod_id, "script", "in_progress", notes=f"Style: {style['name']} | Lang: {target_lang}")
+    threading.Thread(
+        target=_bg_script,
+        args=(job_id, prod_id, system_prompt, user_msg, style["name"], target_lang),
+        daemon=True,
+    ).start()
+    print(f"[Script] prod={prod_id} queued job={job_id} style='{style['name']}'")
+    return jsonify({"queued": True, "job_id": job_id})
+
+
+@app.route("/api/jobs/<job_id>")
+def api_job_status(job_id):
+    """Poll background Claude job status (script / prompts generation)."""
+    job = _claude_jobs.get(job_id)
+    if not job:
+        # Job not in memory (server restarted?) — check DB for current task status
+        return jsonify({"status": "unknown"}), 404
+    return jsonify(job)
 
 
 @app.route("/api/productions/<int:prod_id>/channel", methods=["GET"])
@@ -817,15 +840,36 @@ def api_transcription_auto(prod_id):
 
 # ── Prompts Veo3 generation (DOTTI agent) ─────────────────────────────────────
 
+def _bg_prompts(job_id, prod_id, user_msg):
+    """Background thread: calls Claude DOTTI agent and saves prompts to DB."""
+    try:
+        import anthropic as _anthropic
+        client = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        with client.messages.stream(
+            model=CLAUDE_MODEL,
+            max_tokens=_model_max_tokens(CLAUDE_MODEL),
+            system=DOTTI_SYSTEM,
+            messages=[{"role": "user", "content": user_msg}],
+        ) as stream:
+            prompts_text = stream.get_final_text()
+        database.upsert_task(prod_id, "prompts", "done", result_text=prompts_text)
+        _claude_jobs[job_id].update(status="done")
+        print(f"[Prompts BG] prod={prod_id} done tokens≈{len(prompts_text)//4}")
+    except Exception as exc:
+        database.upsert_task(prod_id, "prompts", "pending", notes=f"Erro: {exc}")
+        _claude_jobs[job_id].update(status="error", error=str(exc))
+        print(f"[Prompts BG] prod={prod_id} error: {exc}")
+
+
 @app.route("/api/productions/<int:prod_id>/tasks/prompts/generate", methods=["POST"])
 def api_prompts_generate(prod_id):
     prod = database.get_production(prod_id)
     if not prod:
         return jsonify({"error": "Produção não encontrada"}), 404
 
-    tasks          = prod.get("tasks") or {}
-    script_text    = tasks.get("script",        {}).get("result_text", "")
-    transcription  = tasks.get("transcription", {}).get("result_text", "")
+    tasks         = prod.get("tasks") or {}
+    script_text   = tasks.get("script",        {}).get("result_text", "")
+    transcription = tasks.get("transcription", {}).get("result_text", "")
     if not script_text:
         return jsonify({"error": "Gere o roteiro primeiro"}), 400
 
@@ -834,21 +878,13 @@ def api_prompts_generate(prod_id):
         user_msg += f"\n\nSINCRONIZAÇÃO (transcrição em blocos de 8 segundos):\n{transcription}"
     user_msg += "\n\nPor favor, analise os personagens e gere todos os prompts de cena para o Veo 3 Flow."
 
-    try:
-        import anthropic as _anthropic
-        client = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-        _max_tok = _model_max_tokens(CLAUDE_MODEL)
-        with client.messages.stream(
-            model=CLAUDE_MODEL,
-            max_tokens=_max_tok,
-            system=DOTTI_SYSTEM,
-            messages=[{"role": "user", "content": user_msg}],
-        ) as stream:
-            prompts_text = stream.get_final_text()
-        database.upsert_task(prod_id, "prompts", "done", result_text=prompts_text)
-        return jsonify({"success": True, "prompts": prompts_text})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+    # Mark in_progress immediately and launch background thread
+    job_id = str(uuid.uuid4())[:12]
+    _claude_jobs[job_id] = {"prod_id": prod_id, "task_type": "prompts", "status": "running", "error": None}
+    database.upsert_task(prod_id, "prompts", "in_progress")
+    threading.Thread(target=_bg_prompts, args=(job_id, prod_id, user_msg), daemon=True).start()
+    print(f"[Prompts] prod={prod_id} queued job={job_id}")
+    return jsonify({"queued": True, "job_id": job_id})
 
 
 # ── Thumbnail generation (GenAIPro VEO) ───────────────────────────────────────

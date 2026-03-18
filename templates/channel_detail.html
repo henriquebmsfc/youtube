@@ -379,18 +379,90 @@
     clearInterval(_audioPollTimer);
     clearInterval(_thumbPollTimer);
     clearInterval(_transPollTimer);
+    _stopPoll();   // stop script/prompts background poll (task keeps running on server)
     panelProdId = panelMode = null;
+  }
+
+  // ══════════════════════════════════════════════════════
+  // BACKGROUND POLLING HELPER
+  // ══════════════════════════════════════════════════════
+  let _bgPoll = null;  // active setInterval handle
+
+  function _stopPoll() {
+    if (_bgPoll) { clearInterval(_bgPoll); _bgPoll = null; }
+  }
+
+  // Poll every 3 s by reloading the production from DB.
+  // When the task status is no longer 'in_progress', calls onDone(prod) or onError(msg).
+  function _startPoll(prodId, taskType, onDone, onError) {
+    _stopPoll();
+    _bgPoll = setInterval(async () => {
+      await loadProductions();
+      const prod = productions.find(p => p.id === prodId);
+      if (!prod) return;
+      const task = (prod.tasks || {})[taskType] || {};
+      if (task.status === 'done') {
+        _stopPoll();
+        onDone(prod, task);
+      } else if (task.status === 'pending' && task.notes && task.notes.startsWith('Erro')) {
+        _stopPoll();
+        onError(task.notes.replace(/^Erro:\s*/, ''));
+      }
+      // status === 'in_progress' → keep polling
+    }, 3000);
+  }
+
+  function _bgSpinner(color, icon, title, subtitle) {
+    return `<div style="text-align:center;padding:3rem;color:var(--muted)">
+      <i class="bi bi-${icon} spinning" style="font-size:2.5rem;color:${color}"></i>
+      <div style="margin-top:1rem;font-weight:600;color:var(--text)">${title}</div>
+      <div style="font-size:.8rem;margin-top:.4rem">${subtitle}</div>
+      <div style="margin-top:1.25rem;font-size:.78rem;color:var(--muted);
+                  background:rgba(56,139,253,.08);border:1px solid rgba(56,139,253,.2);
+                  border-radius:8px;padding:.5rem .9rem;display:inline-block">
+        <i class="bi bi-arrow-left-right"></i>
+        Executando em segundo plano — você pode navegar para outras telas
+      </div>
+    </div>`;
+  }
+
+  function _errHtml(msg) {
+    return `<div style="color:var(--red);padding:1rem;background:rgba(218,54,51,.08);border-radius:8px">
+      <i class="bi bi-exclamation-triangle-fill"></i> ${esc(msg||'Erro desconhecido')}
+    </div>`;
   }
 
   // ══════════════════════════════════════════════════════
   // SCRIPT PANEL
   // ══════════════════════════════════════════════════════
   function renderScriptPanel(prod) {
+    _stopPoll();
     const task = (prod.tasks || {}).script || {};
     const body = document.getElementById('panelBody');
     const foot = document.getElementById('panelFooter');
 
-    // Show style badge if we know which style was used
+    // ── Generating in background ──
+    if (task.status === 'in_progress') {
+      body.innerHTML = _bgSpinner('var(--accent)', 'stars', 'Claude está escrevendo o roteiro…', 'Isso pode levar 20–60 segundos');
+      foot.innerHTML = `<button class="btn-outline" onclick="closePanel()"><i class="bi bi-x"></i> Fechar painel</button>`;
+      _startPoll(prod.id, 'script',
+        (updatedProd, task) => {
+          const styleLabel = task.notes ? ` — ${task.notes.split('|')[0].trim()}` : '';
+          showToast(`✅ Roteiro pronto${styleLabel}!`, false);
+          renderScriptPanel(updatedProd);
+        },
+        (msg) => {
+          document.getElementById('panelBody').innerHTML = _errHtml(msg);
+          document.getElementById('panelFooter').innerHTML =
+            `<button class="btn-accent" id="genScriptBtn" onclick="generateScript()">
+               <i class="bi bi-stars"></i> Tentar novamente
+             </button>`;
+        }
+      );
+      return;
+    }
+
+    // ── Style badge ──
     const styleBadge = task.notes
       ? `<span style="display:inline-block;margin-bottom:.75rem;padding:.2rem .6rem;border-radius:20px;
                       font-size:.72rem;font-weight:600;background:rgba(188,140,255,.15);color:var(--purple);
@@ -422,33 +494,19 @@
 
   async function generateScript() {
     const btn = document.getElementById('genScriptBtn');
-    if (!btn) return;
-    btn.disabled = true;
-    btn.innerHTML = '<i class="bi bi-stars spinning"></i> Gerando…';
-    document.getElementById('panelBody').innerHTML = `
-      <div style="text-align:center;padding:3rem;color:var(--muted)">
-        <i class="bi bi-stars spinning" style="font-size:2.5rem;color:var(--accent)"></i>
-        <div style="margin-top:1rem;font-weight:600">Claude está escrevendo o roteiro…</div>
-        <div style="font-size:.8rem;margin-top:.4rem">Isso pode levar 15–40 segundos</div>
-      </div>`;
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-stars spinning"></i> Iniciando…'; }
     try {
       const res = await fetch(`/api/productions/${panelProdId}/tasks/script/generate`,
         { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' }).then(r => r.json());
-      if (res.success) {
-        const styleLabel = res.style ? ` — estilo: ${res.style}` : '';
-        showToast(`✅ Roteiro gerado${styleLabel}!`, false);
+      if (res.queued) {
         await loadProductions();
         const prod = productions.find(p => p.id === panelProdId);
-        if (prod) renderScriptPanel(prod);
+        if (prod) renderScriptPanel(prod);   // will see in_progress → show spinner + start poll
       } else {
-        document.getElementById('panelBody').innerHTML =
-          `<div style="color:var(--red);padding:1rem;background:rgba(218,54,51,.08);border-radius:8px">
-            <i class="bi bi-exclamation-triangle-fill"></i> ${esc(res.error||'Erro desconhecido')}
-          </div>`;
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-stars"></i> Tentar novamente';
+        document.getElementById('panelBody').innerHTML = _errHtml(res.error);
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-stars"></i> Tentar novamente'; }
       }
-    } catch(e) { showToast('❌ Erro de conexão', true); btn.disabled = false; }
+    } catch(e) { showToast('❌ Erro de conexão', true); if (btn) btn.disabled = false; }
   }
 
   // ══════════════════════════════════════════════════════
@@ -715,6 +773,7 @@
   // PROMPTS PANEL (DOTTI Veo3 Agent)
   // ══════════════════════════════════════════════════════
   function renderPromptsPanel(prod) {
+    _stopPoll();
     const tasks      = prod.tasks || {};
     const promptTask = tasks.prompts || {};
     const scriptTask = tasks.script  || {};
@@ -723,6 +782,26 @@
 
     const hasScript = !!scriptTask.result_text;
     const hasTrans  = !!(tasks.transcription || {}).result_text;
+
+    // ── Generating in background ──
+    if (promptTask.status === 'in_progress') {
+      body.innerHTML = _bgSpinner('var(--purple)', 'stars', 'DOTTI Agent gerando prompts Veo3…', 'Analisando personagens e sincronizando cenas<br>Isso pode levar 30–90 segundos');
+      foot.innerHTML = `<button class="btn-outline" onclick="closePanel()"><i class="bi bi-x"></i> Fechar painel</button>`;
+      _startPoll(prod.id, 'prompts',
+        (updatedProd) => {
+          showToast('✅ Prompts Veo3 prontos!', false);
+          renderPromptsPanel(updatedProd);
+        },
+        (msg) => {
+          document.getElementById('panelBody').innerHTML = _errHtml(msg);
+          document.getElementById('panelFooter').innerHTML =
+            `<button class="btn-accent" id="genPromptsBtn" onclick="generatePrompts()">
+               <i class="bi bi-stars"></i> Tentar novamente
+             </button>`;
+        }
+      );
+      return;
+    }
 
     let topHtml = `
       <div class="info-row">
@@ -766,26 +845,16 @@
 
   async function generatePrompts() {
     const btn = document.getElementById('genPromptsBtn');
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-stars spinning"></i> Gerando…'; }
-    document.getElementById('panelBody').innerHTML = `
-      <div style="text-align:center;padding:3rem;color:var(--muted)">
-        <i class="bi bi-stars spinning" style="font-size:2.5rem;color:var(--purple)"></i>
-        <div style="margin-top:1rem;font-weight:600">DOTTI Agent gerando prompts…</div>
-        <div style="font-size:.8rem;margin-top:.4rem">Analisando personagens e sincronizando cenas<br>Isso pode levar 30–90 segundos</div>
-      </div>`;
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-stars spinning"></i> Iniciando…'; }
     try {
       const res = await fetch(`/api/productions/${panelProdId}/tasks/prompts/generate`,
         { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' }).then(r => r.json());
-      if (res.success) {
-        showToast('✅ Prompts Veo3 gerados!', false);
+      if (res.queued) {
         await loadProductions();
         const prod = productions.find(p => p.id === panelProdId);
-        if (prod) renderPromptsPanel(prod);
+        if (prod) renderPromptsPanel(prod);  // will see in_progress → show spinner + start poll
       } else {
-        document.getElementById('panelBody').innerHTML =
-          `<div style="color:var(--red);padding:1rem;background:rgba(218,54,51,.08);border-radius:8px">
-            <i class="bi bi-exclamation-triangle-fill"></i> ${esc(res.error||'Erro')}
-          </div>`;
+        document.getElementById('panelBody').innerHTML = _errHtml(res.error);
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-stars"></i> Tentar novamente'; }
       }
     } catch(e) { showToast('❌ Erro de conexão', true); if (btn) btn.disabled = false; }
