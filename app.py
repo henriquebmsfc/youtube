@@ -467,6 +467,78 @@ def api_productions_delete(prod_id):
     return jsonify({"success": True})
 
 
+@app.route("/api/productions/<int:prod_id>/title", methods=["PATCH"])
+def api_production_update_title(prod_id):
+    """Update the adapted_title of an existing production."""
+    body = request.get_json(force=True)
+    title = (body.get("adapted_title") or "").strip()
+    if not title:
+        return jsonify({"error": "Título não pode ser vazio"}), 400
+    if not database.get_production(prod_id):
+        return jsonify({"error": "Produção não encontrada"}), 404
+    database.update_production_title(prod_id, title)
+    return jsonify({"success": True})
+
+
+@app.route("/api/translate-title-options", methods=["POST"])
+def api_translate_title_options():
+    """Generate 4 adapted title options (1 literal + 3 cultural) using Claude."""
+    import json as _json
+    import anthropic as _anthropic
+
+    body       = request.get_json(force=True)
+    title      = (body.get("title") or "").strip()
+    target_lang = (body.get("target_lang") or "pt").strip()
+    if not title:
+        return jsonify({"error": "Título obrigatório"}), 400
+
+    _LANG_INFO = {
+        "pt": ("Portuguese", "Portugal/Brazil", "Portugal"),
+        "es": ("Spanish",    "Spain",           "Spain"),
+        "de": ("German",     "Germany",         "Germany"),
+        "fr": ("French",     "France",          "France"),
+        "it": ("Italian",    "Italy",           "Italy"),
+        "ro": ("Romanian",   "Romania",         "Romania"),
+        "pl": ("Polish",     "Poland",          "Poland"),
+    }
+    lang_name, country_name, country_ex = _LANG_INFO.get(target_lang, ("Portuguese", "Brazil", "Brazil"))
+
+    user_msg = (
+        f'Original English YouTube title: "{title}"\n'
+        f'Target language: {lang_name}\n'
+        f'Target market: {country_name}\n\n'
+        f'Generate EXACTLY 4 YouTube title options in {lang_name}:\n\n'
+        f'1. LITERAL: Direct translation keeping all original place/culture references intact\n'
+        f'2. LOCALIZED: Same concept, but replace any foreign country/region/culture references '
+        f'with equivalent ones from {country_name} or its history. '
+        f'Example: "in England" → "in {country_ex}", "English kings" → local equivalent\n'
+        f'3. CREATIVE: Fresh angle on the same theme that resonates with {country_name} viewers\n'
+        f'4. DRAMATIC: Maximum engagement, strong emotional hook, perfect for viral YouTube in {country_name}\n\n'
+        f'For each option also provide a very brief explanation in Portuguese (Brazil) of what '
+        f'the title means (1 short sentence — so Brazilian producers can understand non-PT titles).\n\n'
+        f'Return ONLY a valid JSON array of exactly 4 objects:\n'
+        f'  {{"text": "<title in {lang_name}>", "pt": "<brief explanation in Portuguese>"}}\n'
+        f'No markdown, no extra text, just the JSON array.'
+    )
+    try:
+        client = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        with client.messages.stream(
+            model=CLAUDE_MODEL, max_tokens=600,
+            messages=[{"role": "user", "content": user_msg}],
+        ) as stream:
+            raw = stream.get_final_text().strip()
+        raw = re.sub(r'^```(?:json)?\s*', '', raw)
+        raw = re.sub(r'\s*```$', '', raw).strip()
+        options = _json.loads(raw)
+        if not isinstance(options, list):
+            raise ValueError("Expected list")
+        options = options[:4]
+        return jsonify({"options": options})
+    except Exception as e:
+        print(f"[TranslateOptions] error: {e}")
+        return jsonify({"options": [], "error": str(e)}), 500
+
+
 @app.route("/api/productions/<int:prod_id>/tasks/<task_type>", methods=["PATCH"])
 def api_task_update(prod_id, task_type):
     if task_type not in database.TASK_TYPES:
@@ -480,6 +552,44 @@ def api_task_update(prod_id, task_type):
         notes         = body.get("notes", ""),
     )
     return jsonify({"success": True})
+
+
+@app.route("/api/productions/<int:prod_id>/tasks/<task_type>/reset", methods=["POST"])
+def api_task_reset(prod_id, task_type):
+    """Reset a stuck in_progress task back to done (if real result exists) or pending."""
+    import json as _json_mod
+    if task_type not in database.TASK_TYPES:
+        return jsonify({"error": "Tipo de tarefa inválido"}), 400
+    task = database.get_task(prod_id, task_type)
+    if not task:
+        return jsonify({"error": "Tarefa não encontrada"}), 404
+
+    # Determine new status: "done" if a real result exists, else "pending"
+    new_status = "pending"
+    rt = task.get("result_text") or ""
+    if rt:
+        if task_type == "audio":
+            # Audio result_text during in_progress is just {"task_id":"..."}, not a real result
+            try:
+                new_status = "done" if _json_mod.loads(rt).get("audio_url") else "pending"
+            except Exception:
+                pass
+        else:
+            new_status = "done"
+
+    database.set_task_status(prod_id, task_type, new_status)
+
+    # Clear any in-memory job entries so new generation can start fresh
+    if task_type in ("script", "prompts"):
+        to_remove = [jid for jid, j in _claude_jobs.items()
+                     if j.get("prod_id") == prod_id and j.get("task_type") == task_type]
+        for jid in to_remove:
+            del _claude_jobs[jid]
+    elif task_type == "thumbnails":
+        _thumbnail_jobs.pop(prod_id, None)
+
+    print(f"[Reset] prod={prod_id} task={task_type} → {new_status}")
+    return jsonify({"success": True, "new_status": new_status})
 
 
 def _bg_script(job_id, prod_id, system_prompt, user_msg, style_name, target_lang):
@@ -500,7 +610,8 @@ def _bg_script(job_id, prod_id, system_prompt, user_msg, style_name, target_lang
         _claude_jobs[job_id].update(status="done", style=style_name)
         print(f"[Script BG] prod={prod_id} style='{style_name}' lang={target_lang} tokens≈{len(script_text)//4}")
     except Exception as exc:
-        database.upsert_task(prod_id, "script", "pending", notes=f"Erro: {exc}")
+        # Use set_task_status so that any previously completed result_text is preserved
+        database.set_task_status(prod_id, "script", "pending", notes=f"Erro: {exc}")
         _claude_jobs[job_id].update(status="error", error=str(exc))
         print(f"[Script BG] prod={prod_id} error: {exc}")
 
@@ -567,9 +678,11 @@ def api_script_generate(prod_id):
     user_msg = "\n".join(user_parts)
 
     # Mark in_progress immediately and launch background thread
+    # Use set_task_status (not upsert_task) so that any previous result_text is preserved
+    # in case generation fails and we need to restore to the prior completed run.
     job_id = str(uuid.uuid4())[:12]
     _claude_jobs[job_id] = {"prod_id": prod_id, "task_type": "script", "status": "running", "error": None, "style": None}
-    database.upsert_task(prod_id, "script", "in_progress", notes=f"Style: {style['name']} | Lang: {target_lang}")
+    database.set_task_status(prod_id, "script", "in_progress", notes=f"Style: {style['name']} | Lang: {target_lang}")
     threading.Thread(
         target=_bg_script,
         args=(job_id, prod_id, system_prompt, user_msg, style["name"], target_lang),
@@ -715,6 +828,57 @@ def api_audio_generate(prod_id):
         return jsonify({"error": str(e)}), 500
 
 
+def _auto_trigger_srt(prod_id: int):
+    """Background: auto-generate transcription from SRT URL right after audio completes."""
+    import json as _json
+    import time as _time
+    _time.sleep(1)  # brief delay to ensure the DB write is committed
+    try:
+        prod = database.get_production(prod_id)
+        if not prod:
+            return
+        audio_task = (prod.get("tasks") or {}).get("audio", {})
+        if audio_task.get("status") != "done":
+            return
+        # Skip if transcription already done
+        trans_task = (prod.get("tasks") or {}).get("transcription", {})
+        if trans_task.get("status") == "done" and trans_task.get("result_text"):
+            print(f"[Auto-SRT] prod={prod_id}: transcription already exists, skipping")
+            return
+        try:
+            audio_data = _json.loads(audio_task.get("result_text") or "{}")
+        except Exception:
+            return
+        srt_url   = audio_data.get("subtitle_url", "")
+        task_id_a = audio_data.get("task_id", "")
+        # Fallback: fetch subtitle_url from API if not stored
+        if not srt_url and task_id_a:
+            try:
+                r = http_requests.get(f"{GENAIPRO_BASE}/labs/task/{task_id_a}",
+                                      headers=_gp_headers(), timeout=10)
+                d = r.json()
+                srt_url = d.get("subtitle", "")
+                if srt_url:
+                    audio_data["subtitle_url"] = srt_url
+                    database.upsert_task(prod_id, "audio", "done",
+                                         result_text=_json.dumps(audio_data))
+            except Exception:
+                pass
+        if not srt_url:
+            print(f"[Auto-SRT] prod={prod_id}: no SRT URL available, skipping")
+            return
+        resp = http_requests.get(srt_url, timeout=30)
+        resp.raise_for_status()
+        result_text = _srt_to_blocks(resp.text, interval=8)
+        if result_text:
+            database.upsert_task(prod_id, "transcription", "done", result_text=result_text)
+            print(f"[Auto-SRT] prod={prod_id}: transcription saved automatically ({len(result_text)} chars)")
+        else:
+            print(f"[Auto-SRT] prod={prod_id}: SRT was empty or unrecognised format")
+    except Exception as exc:
+        print(f"[Auto-SRT] prod={prod_id} error: {exc}")
+
+
 @app.route("/api/productions/<int:prod_id>/tasks/audio/status/<task_id>")
 def api_audio_status(prod_id, task_id):
     import json as _json
@@ -731,6 +895,8 @@ def api_audio_status(prod_id, task_id):
                                      "audio_url":    mp3_url,
                                      "subtitle_url": srt_url,
                                  }))
+            # Auto-trigger SRT / transcription in background
+            threading.Thread(target=_auto_trigger_srt, args=(prod_id,), daemon=True).start()
         return jsonify(data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -856,7 +1022,8 @@ def _bg_prompts(job_id, prod_id, user_msg):
         _claude_jobs[job_id].update(status="done")
         print(f"[Prompts BG] prod={prod_id} done tokens≈{len(prompts_text)//4}")
     except Exception as exc:
-        database.upsert_task(prod_id, "prompts", "pending", notes=f"Erro: {exc}")
+        # Use set_task_status so that any previously completed result_text is preserved
+        database.set_task_status(prod_id, "prompts", "pending", notes=f"Erro: {exc}")
         _claude_jobs[job_id].update(status="error", error=str(exc))
         print(f"[Prompts BG] prod={prod_id} error: {exc}")
 
@@ -879,9 +1046,10 @@ def api_prompts_generate(prod_id):
     user_msg += "\n\nPor favor, analise os personagens e gere todos os prompts de cena para o Veo 3 Flow."
 
     # Mark in_progress immediately and launch background thread
+    # Use set_task_status (not upsert_task) so any previous result_text is preserved
     job_id = str(uuid.uuid4())[:12]
     _claude_jobs[job_id] = {"prod_id": prod_id, "task_type": "prompts", "status": "running", "error": None}
-    database.upsert_task(prod_id, "prompts", "in_progress")
+    database.set_task_status(prod_id, "prompts", "in_progress")
     threading.Thread(target=_bg_prompts, args=(job_id, prod_id, user_msg), daemon=True).start()
     print(f"[Prompts] prod={prod_id} queued job={job_id}")
     return jsonify({"queued": True, "job_id": job_id})
@@ -907,7 +1075,9 @@ def api_thumbnails_generate(prod_id):
     source_thumbnail = (prod.get("source_thumbnail") or "").strip()
 
     # Mark in_progress in DB immediately so panel shows spinner on return
-    database.upsert_task(prod_id, "thumbnails", "in_progress")
+    # Use set_task_status (not upsert_task) so previous thumbnail URLs are preserved
+    # in case generation fails and we need to restore via the reset endpoint.
+    database.set_task_status(prod_id, "thumbnails", "in_progress")
 
     # Job keyed by prod_id (not a random UUID) so it can be found without job_id
     _thumbnail_jobs[prod_id] = {
@@ -1049,8 +1219,8 @@ def api_thumbnails_generate(prod_id):
         else:
             job.update(status="error",
                        error="Nenhuma imagem gerada — verifique créditos OpenAI / DALL-E 3")
-            database.upsert_task(prod_id, "thumbnails", "pending",
-                                 notes=job["error"])
+            # Use set_task_status so previous thumbnail URLs in result_text are preserved
+            database.set_task_status(prod_id, "thumbnails", "pending", notes=job["error"])
 
     threading.Thread(target=_bg_thumbnails, daemon=True).start()
     return jsonify({"queued": True})
@@ -1078,6 +1248,11 @@ def _initialize():
     """Init DB, scheduler e auto-fetch. Idempotente."""
     database.init_db()
     database.init_production_tables()
+
+    # On every startup, reset tasks stuck in in_progress (threads don't survive restarts)
+    stale = database.reset_stale_tasks(stale_minutes=0)  # 0 = ALL in_progress
+    if stale:
+        print(f"[Startup] Reset {stale} stale in_progress task(s) to pending/done")
 
     scheduler = BackgroundScheduler(timezone="America/Sao_Paulo")
     scheduler.add_job(

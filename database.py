@@ -338,10 +338,19 @@ def delete_production(production_id: int):
     conn.close()
 
 
+def update_production_title(production_id: int, adapted_title: str):
+    """Update only the adapted_title of a production."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute('UPDATE productions SET adapted_title=? WHERE id=?', (adapted_title, production_id))
+    conn.commit()
+    conn.close()
+
+
 # ── Task CRUD ─────────────────────────────────────────────────────────────────
 
 def upsert_task(production_id: int, task_type: str, status: str,
                 result_text: str = "", notes: str = ""):
+    """Update task — overwrites result_text and notes. Use for done/pending/error."""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('''
@@ -351,6 +360,53 @@ def upsert_task(production_id: int, task_type: str, status: str,
     ''', (status, result_text, notes, production_id, task_type))
     conn.commit()
     conn.close()
+
+
+def set_task_status(production_id: int, task_type: str, status: str, notes: str = ""):
+    """Update only status (and optionally notes). Preserves result_text."""
+    conn = sqlite3.connect(DB_PATH)
+    if notes:
+        conn.execute('''
+            UPDATE production_tasks
+            SET status = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE production_id = ? AND task_type = ?
+        ''', (status, notes, production_id, task_type))
+    else:
+        conn.execute('''
+            UPDATE production_tasks
+            SET status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE production_id = ? AND task_type = ?
+        ''', (status, production_id, task_type))
+    conn.commit()
+    conn.close()
+
+
+def reset_stale_tasks(stale_minutes: int = 15):
+    """Reset in_progress tasks older than N minutes back to pending/done on startup."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    # Find stale in_progress tasks
+    rows = conn.execute('''
+        SELECT id, production_id, task_type, result_text
+        FROM production_tasks
+        WHERE status = 'in_progress'
+          AND updated_at < datetime('now', ? || ' minutes')
+    ''', (f'-{stale_minutes}',)).fetchall()
+
+    for row in rows:
+        # If there's a previous result, restore to done; otherwise reset to pending
+        new_status = 'done' if row['result_text'] else 'pending'
+        conn.execute('''
+            UPDATE production_tasks
+            SET status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (new_status, row['id']))
+        print(f"[Startup] Reset stale in_progress task {row['task_type']} "
+              f"prod={row['production_id']} → {new_status}")
+
+    conn.commit()
+    conn.close()
+    return len(rows)
 
 
 def get_task(production_id: int, task_type: str) -> dict | None:

@@ -88,6 +88,15 @@
     .btn-outline:hover { border-color:var(--blue); color:var(--blue); }
     .btn-danger  { background:rgba(218,54,51,.12); border:1px solid rgba(218,54,51,.3); color:var(--red); padding:.3rem .7rem; border-radius:8px; font-size:.75rem; cursor:pointer; transition:all .15s; }
     .btn-danger:hover { background:rgba(218,54,51,.25); }
+    /* Inline title edit */
+    .prod-title-row { display:flex; align-items:center; gap:.4rem; }
+    .edit-title-btn { background:none; border:none; color:var(--muted); cursor:pointer; font-size:.72rem; padding:.1rem .3rem; border-radius:4px; opacity:0; transition:opacity .15s; flex-shrink:0; }
+    .prod-card:hover .edit-title-btn { opacity:1; }
+    .edit-title-btn:hover { color:var(--blue); }
+    /* Title options in modal */
+    .title-option { padding:.5rem .75rem; border:1px solid var(--border); border-radius:8px; cursor:pointer; margin-bottom:.4rem; transition:all .15s; }
+    .title-option:hover { border-color:var(--blue); background:rgba(56,139,253,.06); }
+    .title-option.selected { border-color:var(--accent); background:rgba(247,129,102,.08); }
 
     /* ── Audio player ── */
     .audio-player-wrap { background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:1rem; }
@@ -233,8 +242,20 @@
         <div id="verifyResult" style="display:none"></div>
         <div id="addForm" style="display:none;margin-top:1rem">
           <div class="mb-3">
-            <label class="form-label">Título adaptado</label>
-            <input id="adapted-title" type="text" class="form-dark">
+            <label class="form-label" style="font-weight:600">Título adaptado</label>
+            <input id="adapted-title" type="text" class="form-dark" placeholder="Edite ou selecione uma sugestão abaixo">
+          </div>
+          <!-- AI-generated title options -->
+          <div id="titleOptSection" style="display:none">
+            <div style="font-size:.75rem;color:var(--muted);margin-bottom:.5rem;display:flex;align-items:center;gap:.4rem">
+              <i class="bi bi-stars" style="color:var(--accent)"></i>
+              Sugestões Claude — clique para usar
+            </div>
+            <div id="titleOptLoader" style="text-align:center;padding:.6rem;font-size:.8rem;color:var(--muted)">
+              <span class="spinner-border spinner-border-sm me-1" style="width:.7rem;height:.7rem;border-width:2px"></span>
+              Gerando opções…
+            </div>
+            <div id="titleOptList"></div>
           </div>
         </div>
       </div>
@@ -272,6 +293,7 @@
   let _audioPollTimer   = null;
   let _thumbPollTimer   = null;
   let _transPollTimer   = null;
+  let _thumbHasResult   = false;  // whether current in_progress thumbnail task has a prior result
 
   // ── Load ─────────────────────────────────────────────────────────────────
   async function loadProductions() {
@@ -314,7 +336,12 @@
               ? `<img src="${esc(p.source_thumbnail)}" class="prod-thumb" onerror="this.style.display='none'">`
               : '<div class="prod-thumb" style="display:flex;align-items:center;justify-content:center;color:var(--muted)"><i class="bi bi-camera-video" style="font-size:1.5rem"></i></div>'}
             <div style="flex:1;min-width:0">
-              <div class="prod-title">${esc(p.adapted_title || p.source_title)}</div>
+              <div class="prod-title-row">
+                <div class="prod-title" style="flex:1;min-width:0">${esc(p.adapted_title || p.source_title)}</div>
+                <button class="edit-title-btn" onclick="editTitle(${p.id})" title="Editar título adaptado">
+                  <i class="bi bi-pencil-fill"></i>
+                </button>
+              </div>
               ${p.adapted_title && p.source_title !== p.adapted_title
                 ? `<div class="prod-source">🔗 ${esc(p.source_title)}</div>` : ''}
               <div class="prod-source"><i class="bi bi-person-circle"></i> ${esc(p.source_channel)}
@@ -404,9 +431,15 @@
       if (task.status === 'done') {
         _stopPoll();
         onDone(prod, task);
-      } else if (task.status === 'pending' && task.notes && task.notes.startsWith('Erro')) {
+      } else if (task.status !== 'in_progress') {
+        // Includes: pending (reset or error), unknown status
         _stopPoll();
-        onError(task.notes.replace(/^Erro:\s*/, ''));
+        if (task.notes && task.notes.match(/^Erro/i)) {
+          onError(task.notes.replace(/^Erro:\s*/i, ''));
+        } else {
+          // Was reset to pending — re-render the panel to show current state
+          if (panelProdId && panelMode) openPanel(panelProdId, panelMode);
+        }
       }
       // status === 'in_progress' → keep polling
     }, 3000);
@@ -432,6 +465,28 @@
     </div>`;
   }
 
+  // Cancel a stuck in_progress task and restore previous result (or reset to pending)
+  async function resetTask(taskType) {
+    try {
+      const res = await fetch(`/api/productions/${panelProdId}/tasks/${taskType}/reset`,
+        { method: 'POST' }).then(r => r.json());
+      if (res.success) {
+        const msg = res.new_status === 'done'
+          ? '↩️ Resultado anterior restaurado'
+          : '⏹ Tarefa cancelada — pronto para gerar novamente';
+        showToast(msg, false);
+        _stopPoll();
+        clearInterval(_thumbPollTimer);
+        clearInterval(_audioPollTimer);
+        await loadProductions();
+        const prod = productions.find(p => p.id === panelProdId);
+        if (prod && panelMode) openPanel(panelMode, prod);
+      } else {
+        showToast('❌ ' + (res.error || 'Erro ao cancelar'), true);
+      }
+    } catch(e) { showToast('❌ Erro de conexão', true); }
+  }
+
   // ══════════════════════════════════════════════════════
   // SCRIPT PANEL
   // ══════════════════════════════════════════════════════
@@ -444,7 +499,11 @@
     // ── Generating in background ──
     if (task.status === 'in_progress') {
       body.innerHTML = _bgSpinner('var(--accent)', 'stars', 'Claude está escrevendo o roteiro…', 'Isso pode levar 20–60 segundos');
-      foot.innerHTML = `<button class="btn-outline" onclick="closePanel()"><i class="bi bi-x"></i> Fechar painel</button>`;
+      foot.innerHTML = `
+        <button class="btn-outline" onclick="closePanel()"><i class="bi bi-x"></i> Fechar painel</button>
+        <button class="btn-danger" onclick="resetTask('script')" title="${task.result_text ? 'Cancelar geração e restaurar roteiro anterior' : 'Cancelar geração'}">
+          <i class="bi bi-stop-circle"></i> ${task.result_text ? 'Cancelar e restaurar' : 'Cancelar'}
+        </button>`;
       _startPoll(prod.id, 'script',
         (updatedProd, task) => {
           const styleLabel = task.notes ? ` — ${task.notes.split('|')[0].trim()}` : '';
@@ -546,8 +605,17 @@
           <i class="bi bi-hourglass-split spinning" style="font-size:2.5rem;color:var(--yellow)"></i>
           <div style="margin-top:1rem;font-weight:600">Gerando áudio…</div>
           <div style="font-size:.8rem;margin-top:.4rem">Aguarde, isso pode levar alguns minutos</div>
+          <div style="margin-top:1rem;font-size:.78rem;color:var(--muted);
+                      background:rgba(56,139,253,.08);border:1px solid rgba(56,139,253,.2);
+                      border-radius:8px;padding:.5rem .9rem;display:inline-block">
+            <i class="bi bi-arrow-left-right"></i> Executando em segundo plano
+          </div>
         </div>`;
-      foot.innerHTML = '';
+      foot.innerHTML = `
+        <button class="btn-outline" onclick="closePanel()"><i class="bi bi-x"></i> Fechar painel</button>
+        <button class="btn-danger" onclick="resetTask('audio')" title="Cancelar geração de áudio">
+          <i class="bi bi-stop-circle"></i> Cancelar
+        </button>`;
       if (taskId) startAudioPolling(prod.id, taskId);
     } else {
       body.innerHTML = renderVoiceSelector();
@@ -786,7 +854,11 @@
     // ── Generating in background ──
     if (promptTask.status === 'in_progress') {
       body.innerHTML = _bgSpinner('var(--purple)', 'stars', 'DOTTI Agent gerando prompts Veo3…', 'Analisando personagens e sincronizando cenas<br>Isso pode levar 30–90 segundos');
-      foot.innerHTML = `<button class="btn-outline" onclick="closePanel()"><i class="bi bi-x"></i> Fechar painel</button>`;
+      foot.innerHTML = `
+        <button class="btn-outline" onclick="closePanel()"><i class="bi bi-x"></i> Fechar painel</button>
+        <button class="btn-danger" onclick="resetTask('prompts')" title="${promptTask.result_text ? 'Cancelar geração e restaurar prompts anteriores' : 'Cancelar geração'}">
+          <i class="bi bi-stop-circle"></i> ${promptTask.result_text ? 'Cancelar e restaurar' : 'Cancelar'}
+        </button>`;
       _startPoll(prod.id, 'prompts',
         (updatedProd) => {
           showToast('✅ Prompts Veo3 prontos!', false);
@@ -872,6 +944,7 @@
 
     // ── Running in background — auto-resume polling ──
     if (thumbTask.status === 'in_progress') {
+      _thumbHasResult = !!thumbTask.result_text;  // track if a prior result exists
       _showThumbProgress(0, 4, 'Aguardando progresso…');
       startThumbPolling(prod.id);
       return;
@@ -984,8 +1057,11 @@
           Executando em segundo plano — você pode navegar para outras telas
         </div>
       </div>`;
-    document.getElementById('panelFooter').innerHTML =
-      `<button class="btn-outline" onclick="closePanel()"><i class="bi bi-x"></i> Fechar painel</button>`;
+    document.getElementById('panelFooter').innerHTML = `
+      <button class="btn-outline" onclick="closePanel()"><i class="bi bi-x"></i> Fechar painel</button>
+      <button class="btn-danger" onclick="resetTask('thumbnails')" title="${_thumbHasResult ? 'Cancelar e restaurar thumbnails anteriores' : 'Cancelar geração'}">
+        <i class="bi bi-stop-circle"></i> ${_thumbHasResult ? 'Cancelar e restaurar' : 'Cancelar'}
+      </button>`;
   }
 
   // Poll by prod_id — no job_id needed, survives navigation
@@ -1026,6 +1102,12 @@
               `<button class="btn-accent" id="genThumbBtn" onclick="generateThumbnails()">
                  <i class="bi bi-image"></i> Tentar novamente
                </button>`;
+          } else if (data.status !== 'processing') {
+            // Task was reset to pending or another non-running state
+            clearInterval(_thumbPollTimer);
+            await loadProductions();
+            const prod = productions.find(p => p.id === prodId);
+            if (prod) renderThumbnailsPanel(prod);
           }
         } else {
           // Panel hidden — keep polling silently, toast when done
@@ -1033,7 +1115,7 @@
             clearInterval(_thumbPollTimer);
             showToast('✅ Thumbnails prontas!', false);
             await loadProductions();
-          } else if (data.status === 'error') {
+          } else if (data.status === 'error' || data.status === 'pending') {
             clearInterval(_thumbPollTimer);
           }
         }
@@ -1075,12 +1157,66 @@
     loadProductions();
   }
 
+  // ── Inline title editing ──────────────────────────────────────────────────
+  function editTitle(prodId) {
+    const prod = productions.find(p => p.id === prodId);
+    if (!prod) return;
+    const row = document.querySelector(`#prod-${prodId} .prod-title-row`);
+    if (!row) return;
+    const cur = prod.adapted_title || prod.source_title;
+    row.innerHTML = `
+      <input type="text" class="form-dark" id="edit-title-input-${prodId}"
+             value="${esc(cur)}" style="flex:1;font-size:.9rem;padding:.3rem .6rem">
+      <button class="btn-outline" style="padding:.25rem .5rem;font-size:.8rem" onclick="cancelEditTitle()" title="Cancelar">
+        <i class="bi bi-x-lg"></i>
+      </button>
+      <button class="btn-accent" style="padding:.25rem .5rem;font-size:.8rem" onclick="saveTitle(${prodId})" title="Salvar">
+        <i class="bi bi-check2-all"></i>
+      </button>`;
+    const inp = document.getElementById(`edit-title-input-${prodId}`);
+    inp.focus(); inp.select();
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  saveTitle(prodId);
+      if (e.key === 'Escape') cancelEditTitle();
+    });
+  }
+
+  async function saveTitle(prodId) {
+    const inp = document.getElementById(`edit-title-input-${prodId}`);
+    if (!inp) return;
+    const newTitle = inp.value.trim();
+    if (!newTitle) { showToast('❌ Título não pode ser vazio', true); return; }
+    const res = await fetch(`/api/productions/${prodId}/title`, {
+      method:'PATCH', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ adapted_title: newTitle })
+    }).then(r => r.json());
+    if (res.success) {
+      showToast('✅ Título atualizado!', false);
+      await loadProductions();
+      // If this production is open in the side panel, refresh the subtitle
+      if (panelProdId === prodId) {
+        const updatedProd = productions.find(p => p.id === prodId);
+        if (updatedProd)
+          document.getElementById('panelSub').textContent =
+            (updatedProd.adapted_title || updatedProd.source_title || '').slice(0, 70);
+      }
+    } else {
+      showToast('❌ ' + (res.error || 'Erro ao salvar'), true);
+    }
+  }
+
+  function cancelEditTitle() {
+    renderProductions();   // restore from cached data, no server call needed
+  }
+
   // ── Add by URL ────────────────────────────────────────────────────────────
   function openAddUrl() {
     document.getElementById('url-input').value = '';
     document.getElementById('verifyResult').style.display = 'none';
     document.getElementById('addForm').style.display = 'none';
     document.getElementById('addToChannelBtn').style.display = 'none';
+    document.getElementById('titleOptSection').style.display = 'none';
+    document.getElementById('titleOptList').innerHTML = '';
     verifiedVideo = null;
     new bootstrap.Modal(document.getElementById('modalAddUrl')).show();
   }
@@ -1119,11 +1255,62 @@
     document.getElementById('addToChannelBtn').style.display = '';
     document.getElementById('adapted-title').value = res.title;
     if (CHANNEL_LANG !== 'en') {
+      // Quick translation into adapted-title while Claude options load
       fetch('https://api.mymemory.translated.net/get?q=' + encodeURIComponent(res.title) + '&langpair=en|' + CHANNEL_LANG)
         .then(r => r.json())
         .then(d => { if (d.responseData?.translatedText) document.getElementById('adapted-title').value = d.responseData.translatedText; })
         .catch(() => {});
+      // Load 4 Claude-generated options in parallel
+      loadTitleOptions(res.title);
     }
+  }
+
+  async function loadTitleOptions(originalTitle) {
+    const sec = document.getElementById('titleOptSection');
+    const loader = document.getElementById('titleOptLoader');
+    const list   = document.getElementById('titleOptList');
+    sec.style.display = '';
+    loader.style.display = '';
+    list.innerHTML = '';
+    try {
+      const res = await fetch('/api/translate-title-options', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ title: originalTitle, target_lang: CHANNEL_LANG })
+      }).then(r => r.json());
+      loader.style.display = 'none';
+      if (res.options && res.options.length) {
+        const labels = [
+          { icon: '🔤', name: 'Literal' },
+          { icon: '🌍', name: 'Localizado' },
+          { icon: '✨', name: 'Criativo' },
+          { icon: '⚡', name: 'Impactante' },
+        ];
+        list.innerHTML = res.options.map((opt, i) => {
+          const lbl = labels[i] || { icon: '📌', name: `Opção ${i+1}` };
+          const ptNote = (CHANNEL_LANG !== 'pt' && opt.pt)
+            ? `<div style="font-size:.7rem;color:var(--muted);margin-top:.15rem">🇧🇷 ${esc(opt.pt)}</div>`
+            : '';
+          return `<div class="title-option" onclick="selectTitleOption(this, ${JSON.stringify(opt.text)})">
+            <div style="font-size:.68rem;font-weight:700;color:var(--muted);margin-bottom:.15rem">
+              ${lbl.icon} ${lbl.name}
+            </div>
+            <div style="font-size:.87rem;font-weight:500;color:var(--text)">${esc(opt.text)}</div>
+            ${ptNote}
+          </div>`;
+        }).join('');
+      } else {
+        sec.style.display = 'none';
+      }
+    } catch(e) {
+      loader.style.display = 'none';
+      sec.style.display = 'none';
+    }
+  }
+
+  function selectTitleOption(el, text) {
+    document.getElementById('adapted-title').value = text;
+    document.querySelectorAll('.title-option').forEach(o => o.classList.remove('selected'));
+    el.classList.add('selected');
   }
 
   async function addToChannel() {
