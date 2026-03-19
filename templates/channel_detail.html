@@ -1273,11 +1273,18 @@
     loader.style.display = '';
     list.innerHTML = '';
     try {
-      const res = await fetch('/api/translate-title-options', {
+      const r = await fetch('/api/translate-title-options', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ title: originalTitle, target_lang: CHANNEL_LANG })
-      }).then(r => r.json());
+      });
+      const res = await r.json();
       loader.style.display = 'none';
+      if (!r.ok || res.error) {
+        list.innerHTML = `<div style="font-size:.75rem;color:var(--red);padding:.4rem 0">
+          ⚠️ Erro ao gerar opções: ${esc(res.error || 'HTTP ' + r.status)}
+        </div>`;
+        return;
+      }
       if (res.options && res.options.length) {
         const labels = [
           { icon: '🔤', name: 'Literal' },
@@ -1299,11 +1306,11 @@
           </div>`;
         }).join('');
       } else {
-        sec.style.display = 'none';
+        list.innerHTML = `<div style="font-size:.75rem;color:var(--muted);padding:.4rem 0">Nenhuma opção gerada.</div>`;
       }
     } catch(e) {
       loader.style.display = 'none';
-      sec.style.display = 'none';
+      list.innerHTML = `<div style="font-size:.75rem;color:var(--red);padding:.4rem 0">⚠️ Erro de rede: ${esc(e.message)}</div>`;
     }
   }
 
