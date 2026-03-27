@@ -649,6 +649,11 @@ def api_script_generate(prod_id):
         "\n\nFORMAT REQUIREMENT: Output PLAIN TEXT only — the script must be ready to be read aloud."
         " Absolutely NO markdown: no **, no __, no ##, no *, no bullet dashes, no backticks, no > blockquotes."
         " Separate paragraphs with a blank line. That is the only allowed formatting."
+        "\n\nYOUTUBE CONTENT POLICY: This is an educational history documentary."
+        " Do NOT describe graphic violence, gore, or torture in explicit or gratuitous detail."
+        " Battles and conflicts must be framed from a historical and analytical perspective."
+        " Executions, deaths, and suffering must be referenced factually and briefly, never sensationalized."
+        " Content must comply with YouTube's advertiser-friendly guidelines at all times."
     )
 
     existing_ts = (prod.get("tasks") or {}).get("transcription", {})
@@ -877,6 +882,62 @@ def _auto_trigger_srt(prod_id: int):
             print(f"[Auto-SRT] prod={prod_id}: SRT was empty or unrecognised format")
     except Exception as exc:
         print(f"[Auto-SRT] prod={prod_id} error: {exc}")
+    else:
+        # After successful transcription, trigger description generation
+        if result_text:
+            threading.Thread(target=_auto_trigger_description, args=(prod_id,), daemon=True).start()
+
+
+def _auto_trigger_description(prod_id: int):
+    """Background: auto-generate YouTube description after transcription is ready."""
+    import json as _json
+    try:
+        prod = database.get_production(prod_id)
+        if not prod:
+            return
+        tasks = prod.get("tasks") or {}
+        # Skip if description already done
+        desc_task = tasks.get("description", {})
+        if desc_task.get("status") == "done" and desc_task.get("result_text"):
+            print(f"[Auto-Desc] prod={prod_id}: description already exists, skipping")
+            return
+        script_text = tasks.get("script", {}).get("result_text", "")
+        if not script_text:
+            print(f"[Auto-Desc] prod={prod_id}: no script, skipping")
+            return
+        title = prod.get("adapted_title") or prod.get("source_title", "")
+        channel = database.get_channel(prod["channel_id"])
+        lang_code = (channel or {}).get("language_code", "it")
+        lang_name = {
+            "it": "Italian", "pt": "Portuguese", "es": "Spanish",
+            "de": "German", "fr": "French", "ro": "Romanian", "pl": "Polish",
+        }.get(lang_code, "Italian")
+
+        database.set_task_status(prod_id, "description", "in_progress")
+        import anthropic as _anthropic
+        client = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        user_msg = (
+            f'YouTube video title: "{title}"\n\n'
+            f'Script (first 2500 words):\n{script_text[:6000]}\n\n'
+            f'Generate a complete YouTube description in {lang_name} for this historical documentary video.\n\n'
+            f'Structure:\n'
+            f'1. Hook (2 sentences visible before "Show more" — must compel clicking)\n'
+            f'2. Summary of what the viewer will learn (3-5 sentences)\n'
+            f'3. Key topics covered (brief bullet list using • symbol)\n'
+            f'4. Call to action (subscribe, like, comment)\n'
+            f'5. 15-20 relevant hashtags on the last line\n\n'
+            f'Write entirely in {lang_name}. No markdown bold/italic. Use plain text.'
+        )
+        with client.messages.stream(
+            model=CLAUDE_MODEL, max_tokens=800,
+            messages=[{"role": "user", "content": user_msg}],
+        ) as stream:
+            desc_text = stream.get_final_text()
+        database.upsert_task(prod_id, "description", "done", result_text=desc_text)
+        print(f"[Auto-Desc] prod={prod_id}: description saved ({len(desc_text)} chars)")
+    except Exception as exc:
+        database.set_task_status(prod_id, "description", "pending")
+        print(f"[Auto-Desc] prod={prod_id} error: {exc}")
 
 
 @app.route("/api/productions/<int:prod_id>/tasks/audio/status/<task_id>")
@@ -993,6 +1054,8 @@ def api_transcription_auto(prod_id):
                 _transcription_jobs[job_id].update(
                     status="done", progress="Concluído!", result=result_text
                 )
+                # Auto-generate YouTube description
+                threading.Thread(target=_auto_trigger_description, args=(prod_id,), daemon=True).start()
             else:
                 _transcription_jobs[job_id].update(
                     status="error", error="SRT vazio ou formato não reconhecido"
@@ -1028,6 +1091,18 @@ def _bg_prompts(job_id, prod_id, user_msg):
         print(f"[Prompts BG] prod={prod_id} error: {exc}")
 
 
+@app.route("/api/productions/<int:prod_id>/tasks/description/generate", methods=["POST"])
+def api_description_generate(prod_id):
+    prod = database.get_production(prod_id)
+    if not prod:
+        return jsonify({"error": "Produção não encontrada"}), 404
+    if not (prod.get("tasks") or {}).get("script", {}).get("result_text"):
+        return jsonify({"error": "Gere o roteiro primeiro"}), 400
+    database.set_task_status(prod_id, "description", "in_progress")
+    threading.Thread(target=_auto_trigger_description, args=(prod_id,), daemon=True).start()
+    return jsonify({"queued": True})
+
+
 @app.route("/api/productions/<int:prod_id>/tasks/prompts/generate", methods=["POST"])
 def api_prompts_generate(prod_id):
     prod = database.get_production(prod_id)
@@ -1043,7 +1118,13 @@ def api_prompts_generate(prod_id):
     user_msg = f"ROTEIRO:\n{script_text}"
     if transcription:
         user_msg += f"\n\nSINCRONIZAÇÃO (transcrição em blocos de 8 segundos):\n{transcription}"
-    user_msg += "\n\nPor favor, analise os personagens e gere todos os prompts de cena para o Veo 3 Flow."
+        user_msg += "\n\nGere TODOS os prompts de cena para o Veo 3 Flow, seguindo a sincronização fornecida (um prompt por bloco de 8 segundos)."
+    else:
+        user_msg += (
+            "\n\nNão há sincronização disponível ainda. Estime a duração total do roteiro "
+            "(média: 130 palavras = 60 segundos de narração) e gere prompts de 8 segundos "
+            "cobrindo toda a duração estimada. Distribua as cenas de forma uniforme ao longo do roteiro."
+        )
 
     # Mark in_progress immediately and launch background thread
     # Use set_task_status (not upsert_task) so any previous result_text is preserved

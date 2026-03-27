@@ -145,7 +145,7 @@ def log_fetch(videos_found: int, status: str, message: str = ""):
 
 # ── Production pipeline tables ────────────────────────────────────────────────
 
-TASK_TYPES = ["script", "audio", "transcription", "prompts", "thumbnails", "video", "posting"]
+TASK_TYPES = ["script", "audio", "transcription", "description", "prompts", "thumbnails", "video", "posting"]
 
 
 def init_production_tables():
@@ -186,17 +186,18 @@ def init_production_tables():
             updated_at    TEXT DEFAULT CURRENT_TIMESTAMP
         );
     ''')
-    # Migration: add thumbnails task to existing productions that don't have it
-    for row in conn.execute("SELECT id FROM productions").fetchall():
-        exists = conn.execute(
-            "SELECT id FROM production_tasks WHERE production_id=? AND task_type='thumbnails'",
-            (row[0],)
-        ).fetchone()
-        if not exists:
-            conn.execute(
-                "INSERT INTO production_tasks (production_id, task_type) VALUES (?, 'thumbnails')",
-                (row[0],)
-            )
+    # Migration: add any missing task types to existing productions
+    for task_type in ('thumbnails', 'description'):
+        for row in conn.execute("SELECT id FROM productions").fetchall():
+            exists = conn.execute(
+                "SELECT id FROM production_tasks WHERE production_id=? AND task_type=?",
+                (row[0], task_type)
+            ).fetchone()
+            if not exists:
+                conn.execute(
+                    "INSERT INTO production_tasks (production_id, task_type) VALUES (?, ?)",
+                    (row[0], task_type)
+                )
     conn.commit()
     conn.close()
 
@@ -353,6 +354,11 @@ def upsert_task(production_id: int, task_type: str, status: str,
     """Update task — overwrites result_text and notes. Use for done/pending/error."""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
+    # Ensure row exists (handles new task types added after production was created)
+    c.execute(
+        'INSERT OR IGNORE INTO production_tasks (production_id, task_type) VALUES (?, ?)',
+        (production_id, task_type)
+    )
     c.execute('''
         UPDATE production_tasks
         SET status = ?, result_text = ?, notes = ?, updated_at = CURRENT_TIMESTAMP

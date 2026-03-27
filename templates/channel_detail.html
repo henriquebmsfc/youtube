@@ -279,6 +279,7 @@
     script:        { icon:'📝', label:'Roteiro',     action:'panel' },
     audio:         { icon:'🎙️', label:'Áudio',        action:'panel' },
     transcription: { icon:'📄', label:'Transcrição',  action:'panel' },
+    description:   { icon:'📋', label:'Descrição',    action:'panel' },
     prompts:       { icon:'🎨', label:'Prompts',      action:'panel' },
     thumbnails:    { icon:'🖼️', label:'Thumbnails',   action:'panel' },
     video:         { icon:'🎬', label:'Vídeo',        action:'modal' },
@@ -287,7 +288,7 @@
 
   let productions   = [];
   let panelProdId   = null;
-  let panelMode     = null;   // 'script' | 'audio' | 'transcription' | 'prompts' | 'thumbnails'
+  let panelMode     = null;   // 'script' | 'audio' | 'transcription' | 'description' | 'prompts' | 'thumbnails'
   let activeTask    = null;
   let verifiedVideo = null;
   let _audioPollTimer   = null;
@@ -393,6 +394,7 @@
     if (mode === 'script')        renderScriptPanel(prod);
     else if (mode === 'audio')    renderAudioPanel(prod);
     else if (mode === 'transcription') renderTranscriptionPanel(prod);
+    else if (mode === 'description') renderDescriptionPanel(prod);
     else if (mode === 'prompts')  renderPromptsPanel(prod);
     else if (mode === 'thumbnails') renderThumbnailsPanel(prod);
 
@@ -403,10 +405,9 @@
   function closePanel() {
     document.getElementById('sidePanel').classList.remove('open');
     document.getElementById('overlay').style.display = 'none';
-    clearInterval(_audioPollTimer);
-    clearInterval(_thumbPollTimer);
-    clearInterval(_transPollTimer);
-    _stopPoll();   // stop script/prompts background poll (task keeps running on server)
+    // NOTE: do NOT clear _audioPollTimer / _thumbPollTimer / _transPollTimer here —
+    // they continue running in background and show toast when done.
+    _stopPoll();   // stop script/prompts poll (DB-based, restarts when panel reopens)
     panelProdId = panelMode = null;
   }
 
@@ -723,10 +724,14 @@
       try {
         const data = await fetch(`/api/productions/${prodId}/tasks/audio/status/${taskId}`)
           .then(r => r.json());
-        const info = document.getElementById('audioPollInfo');
-        if (info) info.textContent = `Status: ${data.status || '…'}`;
+        // Update panel status text only when panel is showing this task
+        if (panelProdId === prodId && panelMode === 'audio') {
+          const info = document.getElementById('audioPollInfo');
+          if (info) info.textContent = `Status: ${data.status || '…'}`;
+        }
         if (data.status === 'completed' || data.status === 'done') {
           clearInterval(_audioPollTimer);
+          _audioPollTimer = null;
           showToast('✅ Áudio gerado com sucesso!', false);
           await loadProductions();
           if (panelProdId === prodId && panelMode === 'audio') {
@@ -735,6 +740,7 @@
           }
         } else if (data.status === 'failed' || data.error) {
           clearInterval(_audioPollTimer);
+          _audioPollTimer = null;
           showToast('❌ Falha na geração do áudio: ' + (data.error || data.status), true);
         }
       } catch(e) {}
@@ -835,6 +841,85 @@
         }
       } catch(e) {}
     }, 3000);
+  }
+
+  // ══════════════════════════════════════════════════════
+  // DESCRIPTION PANEL
+  // ══════════════════════════════════════════════════════
+  function renderDescriptionPanel(prod) {
+    _stopPoll();
+    const tasks   = prod.tasks || {};
+    const descTask = tasks.description || {};
+    const body = document.getElementById('panelBody');
+    const foot = document.getElementById('panelFooter');
+
+    if (descTask.status === 'in_progress') {
+      body.innerHTML = _bgSpinner('var(--blue)', 'file-text', 'Gerando descrição YouTube…', 'Claude está criando a descrição SEO otimizada');
+      foot.innerHTML = `<button class="btn-outline" onclick="closePanel()"><i class="bi bi-x"></i> Fechar painel</button>`;
+      _startPoll(prod.id, 'description',
+        (updatedProd) => { showToast('✅ Descrição pronta!', false); renderDescriptionPanel(updatedProd); },
+        (msg) => { body.innerHTML = _errHtml(msg); }
+      );
+      return;
+    }
+
+    const hasScript = !!(tasks.script || {}).result_text;
+    const hasTrans  = !!(tasks.transcription || {}).result_text;
+
+    if (descTask.result_text) {
+      body.innerHTML = `
+        <div class="info-row" style="font-size:.78rem;color:var(--muted)">
+          <i class="bi bi-stars" style="color:var(--accent)"></i>
+          Gerado automaticamente após a transcrição
+        </div>
+        <div class="section-sep"></div>
+        <textarea id="descArea" class="panel-ta" style="min-height:420px">${esc(descTask.result_text)}</textarea>`;
+      foot.innerHTML = `
+        <button class="btn-accent" id="genDescBtn" onclick="generateDescription()" ${!hasScript ? 'disabled' : ''}>
+          <i class="bi bi-arrow-repeat"></i> Regenerar
+        </button>
+        <button class="btn-blue" onclick="navigator.clipboard.writeText(document.getElementById('descArea').value).then(()=>showToast('📋 Copiado!',false))">
+          <i class="bi bi-clipboard"></i> Copiar
+        </button>`;
+    } else {
+      body.innerHTML = `
+        <div class="info-row">
+          <i class="bi bi-${hasScript ? 'check-circle-fill' : 'x-circle-fill'}"
+             style="color:var(--${hasScript ? 'green' : 'red'})"></i>
+          Roteiro ${hasScript ? 'disponível ✓' : 'não gerado — gere primeiro'}
+        </div>
+        <div class="info-row">
+          <i class="bi bi-${hasTrans ? 'check-circle-fill' : 'dash-circle'}"
+             style="color:var(--${hasTrans ? 'green' : 'muted'})"></i>
+          Transcrição ${hasTrans ? 'disponível ✓' : 'não disponível (a descrição é gerada automaticamente após a transcrição)'}
+        </div>
+        <div style="text-align:center;padding:2rem;color:var(--muted)">
+          <i class="bi bi-file-text" style="font-size:2rem"></i>
+          <div style="margin-top:.75rem">Nenhuma descrição gerada ainda</div>
+          <div style="font-size:.82rem;margin-top:.4rem">Gerada automaticamente após a transcrição<br>ou clique em "Gerar Descrição" abaixo</div>
+        </div>`;
+      foot.innerHTML = `
+        <button class="btn-accent" id="genDescBtn" onclick="generateDescription()" ${!hasScript ? 'disabled title="Gere o roteiro primeiro"' : ''}>
+          <i class="bi bi-file-text"></i> Gerar Descrição
+        </button>`;
+    }
+  }
+
+  async function generateDescription() {
+    const btn = document.getElementById('genDescBtn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-file-text spinning"></i> Gerando…'; }
+    try {
+      const res = await fetch(`/api/productions/${panelProdId}/tasks/description/generate`,
+        { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' }).then(r => r.json());
+      if (res.queued) {
+        await loadProductions();
+        const prod = productions.find(p => p.id === panelProdId);
+        if (prod) renderDescriptionPanel(prod);
+      } else {
+        document.getElementById('panelBody').innerHTML = _errHtml(res.error);
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-file-text"></i> Tentar novamente'; }
+      }
+    } catch(e) { showToast('❌ Erro de conexão', true); if (btn) btn.disabled = false; }
   }
 
   // ══════════════════════════════════════════════════════
