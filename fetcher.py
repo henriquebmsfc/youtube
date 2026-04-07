@@ -62,7 +62,7 @@ def fetch_videos() -> int:
     # One search per keyword = 100 quota units each.
     video_keyword: dict[str, str] = {}
 
-    for keyword in config.KEYWORDS:
+    for keyword in database.get_keywords():
         try:
             resp = (
                 youtube.search()

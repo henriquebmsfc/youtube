@@ -226,6 +226,24 @@ def api_stats():
     return jsonify(database.get_stats())
 
 
+@app.route("/api/settings/keywords", methods=["GET"])
+def api_keywords_get():
+    return jsonify({"keywords": database.get_keywords()})
+
+
+@app.route("/api/settings/keywords", methods=["PUT"])
+def api_keywords_put():
+    body = request.get_json(force=True)
+    keywords = body.get("keywords", [])
+    if not isinstance(keywords, list):
+        return jsonify({"error": "keywords deve ser uma lista"}), 400
+    keywords = [k.strip() for k in keywords if isinstance(k, str) and k.strip()]
+    if not keywords:
+        return jsonify({"error": "Pelo menos uma keyword é obrigatória"}), 400
+    database.set_keywords(keywords)
+    return jsonify({"keywords": database.get_keywords()})
+
+
 @app.route("/api/refresh", methods=["POST"])
 def api_refresh():
     try:

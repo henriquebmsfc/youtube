@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 from datetime import datetime
@@ -43,8 +44,46 @@ def init_db():
             message      TEXT
         )
     ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    ''')
     conn.commit()
     conn.close()
+
+
+def get_setting(key: str, default: str = "") -> str:
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    conn.close()
+    return row[0] if row else default
+
+
+def set_setting(key: str, value: str):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
+    conn.commit()
+    conn.close()
+
+
+def get_keywords() -> list[str]:
+    """Return current search keywords. Falls back to config.KEYWORDS if not set in DB."""
+    raw = get_setting("keywords")
+    if raw:
+        try:
+            kws = json.loads(raw)
+            if isinstance(kws, list) and kws:
+                return kws
+        except Exception:
+            pass
+    return list(_cfg.KEYWORDS)
+
+
+def set_keywords(keywords: list[str]):
+    """Persist search keywords to DB."""
+    set_setting("keywords", json.dumps([k.strip() for k in keywords if k.strip()]))
 
 
 def wipe_videos():

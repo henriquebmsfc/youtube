@@ -391,6 +391,35 @@
         <div id="kwBars"></div>
       </div>
 
+      <!-- Keywords management -->
+      <div class="sidebar-box">
+        <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
+          <span>Palavras-chave de busca</span>
+          <button onclick="toggleKwEdit()" id="kwEditBtn"
+                  style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:.75rem;padding:0">
+            <i class="bi bi-pencil-fill"></i>
+          </button>
+        </div>
+        <div id="kwReadList" style="font-size:.78rem;color:var(--muted);line-height:1.9"></div>
+        <div id="kwEditArea" style="display:none">
+          <div id="kwTagList" style="display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:.5rem"></div>
+          <div style="display:flex;gap:.35rem;margin-bottom:.5rem">
+            <input id="kwNewInput" type="text" placeholder="Nova keyword…"
+                   style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:.3rem .6rem;font-size:.78rem;outline:none"
+                   onkeydown="if(event.key==='Enter')addKw()">
+            <button onclick="addKw()"
+                    style="background:rgba(56,139,253,.15);border:1px solid rgba(56,139,253,.4);color:var(--blue);border-radius:6px;padding:.3rem .6rem;font-size:.78rem;cursor:pointer">
+              + Add
+            </button>
+          </div>
+          <button onclick="saveKeywords()" id="kwSaveBtn"
+                  style="width:100%;background:var(--accent);border:none;color:#fff;border-radius:7px;padding:.4rem;font-size:.8rem;font-weight:600;cursor:pointer">
+            Salvar
+          </button>
+          <div id="kwSaveMsg" style="font-size:.72rem;margin-top:.3rem;text-align:center;display:none"></div>
+        </div>
+      </div>
+
       <div class="sidebar-box">
         <div class="section-title">Sobre os scores</div>
         <div style="font-size:0.78rem;color:var(--muted);line-height:1.5">
@@ -496,6 +525,74 @@
     if (score >= 65) return { cls: 'opp-high', label: '🟢 Alto potencial' };
     if (score >= 35) return { cls: 'opp-med',  label: '🟡 Médio'          };
     return              { cls: 'opp-low',  label: '🔴 Baixo'           };
+  }
+
+  // ── Keywords management ────────────────────────────────────────────────────
+  let _kwList = [];
+
+  async function loadKeywords() {
+    const data = await fetch('/api/settings/keywords').then(r => r.json());
+    _kwList = data.keywords || [];
+    renderKwRead();
+  }
+
+  function renderKwRead() {
+    document.getElementById('kwReadList').innerHTML =
+      _kwList.map(k => `<div>• ${escHtml(k)}</div>`).join('') || '<em>Nenhuma</em>';
+  }
+
+  function renderKwTags() {
+    document.getElementById('kwTagList').innerHTML = _kwList.map((k, i) => `
+      <span style="display:inline-flex;align-items:center;gap:.25rem;background:rgba(56,139,253,.12);
+                   border:1px solid rgba(56,139,253,.3);border-radius:20px;padding:.18rem .55rem;font-size:.75rem;color:var(--blue)">
+        ${escHtml(k)}
+        <button onclick="removeKw(${i})"
+                style="background:none;border:none;color:var(--muted);cursor:pointer;padding:0;line-height:1;font-size:.8rem">×</button>
+      </span>`).join('');
+  }
+
+  function toggleKwEdit() {
+    const area = document.getElementById('kwEditArea');
+    const read = document.getElementById('kwReadList');
+    const open = area.style.display === 'none';
+    area.style.display = open ? '' : 'none';
+    read.style.display = open ? 'none' : '';
+    if (open) renderKwTags();
+  }
+
+  function addKw() {
+    const inp = document.getElementById('kwNewInput');
+    const val = inp.value.trim();
+    if (!val || _kwList.includes(val)) { inp.value = ''; return; }
+    _kwList.push(val);
+    inp.value = '';
+    renderKwTags();
+  }
+
+  function removeKw(i) {
+    _kwList.splice(i, 1);
+    renderKwTags();
+  }
+
+  async function saveKeywords() {
+    const btn = document.getElementById('kwSaveBtn');
+    const msg = document.getElementById('kwSaveMsg');
+    btn.disabled = true; btn.textContent = 'Salvando…';
+    const res = await fetch('/api/settings/keywords', {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ keywords: _kwList })
+    }).then(r => r.json());
+    btn.disabled = false; btn.textContent = 'Salvar';
+    if (res.keywords) {
+      _kwList = res.keywords;
+      renderKwRead();
+      msg.style.display = ''; msg.style.color = 'var(--green)';
+      msg.textContent = '✓ Salvo! Próximo sync usará as novas keywords.';
+      setTimeout(() => { msg.style.display = 'none'; toggleKwEdit(); }, 2000);
+    } else {
+      msg.style.display = ''; msg.style.color = 'var(--red)';
+      msg.textContent = res.error || 'Erro ao salvar';
+    }
   }
 
   // ── Load ───────────────────────────────────────────────────────────────────
@@ -690,7 +787,7 @@
 
   // ── Init ───────────────────────────────────────────────────────────────────
   (async () => {
-    await Promise.all([loadStats(), loadVideos()]);
+    await Promise.all([loadStats(), loadVideos(), loadKeywords()]);
     // Auto-refresh UI every 5 minutes
     setInterval(() => Promise.all([loadStats(), loadVideos()]), 5 * 60 * 1000);
   })();
