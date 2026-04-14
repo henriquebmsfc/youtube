@@ -412,16 +412,15 @@
   }
 
   // ══════════════════════════════════════════════════════
-  // BACKGROUND POLLING HELPER
+  // BACKGROUND POLLING HELPERS
   // ══════════════════════════════════════════════════════
-  let _bgPoll = null;  // active setInterval handle
+  let _bgPoll = null;  // panel-specific poll (3s, only while panel open)
 
   function _stopPoll() {
     if (_bgPoll) { clearInterval(_bgPoll); _bgPoll = null; }
   }
 
-  // Poll every 3 s by reloading the production from DB.
-  // When the task status is no longer 'in_progress', calls onDone(prod) or onError(msg).
+  // Poll every 3 s for the open panel's task.
   function _startPoll(prodId, taskType, onDone, onError) {
     _stopPoll();
     _bgPoll = setInterval(async () => {
@@ -433,18 +432,60 @@
         _stopPoll();
         onDone(prod, task);
       } else if (task.status !== 'in_progress') {
-        // Includes: pending (reset or error), unknown status
         _stopPoll();
         if (task.notes && task.notes.match(/^Erro/i)) {
           onError(task.notes.replace(/^Erro:\s*/i, ''));
         } else {
-          // Was reset to pending — re-render the panel to show current state
           if (panelProdId && panelMode) openPanel(panelProdId, panelMode);
         }
       }
-      // status === 'in_progress' → keep polling
     }, 3000);
   }
+
+  // ── Global background poll (5 s) ─────────────────────────────────────────
+  // Runs continuously. Only fetches when there is an in_progress task.
+  // Shows toast + refreshes panel/cards when any task finishes.
+  const _TASK_LABELS = {
+    script:'Roteiro', prompts:'Prompts', audio:'Áudio',
+    transcription:'Transcrição', thumbnails:'Thumbnails', description:'Descrição'
+  };
+
+  setInterval(async () => {
+    const hasInProgress = productions.some(p =>
+      Object.values(p.tasks || {}).some(t => t.status === 'in_progress')
+    );
+    if (!hasInProgress) return;
+
+    // Snapshot which tasks are currently in_progress
+    const before = {};
+    productions.forEach(p => {
+      Object.entries(p.tasks || {}).forEach(([type, t]) => {
+        if (t.status === 'in_progress') before[`${p.id}:${type}`] = true;
+      });
+    });
+
+    await loadProductions();  // refreshes cards via renderProductions()
+
+    // Check what just finished
+    Object.keys(before).forEach(key => {
+      const [prodIdStr, taskType] = key.split(':');
+      const prodId = parseInt(prodIdStr);
+      const prod   = productions.find(p => p.id === prodId);
+      const task   = (prod?.tasks || {})[taskType] || {};
+      if (task.status === 'in_progress') return;  // still running
+
+      // _bgPoll (panel poll) already handles the currently-open panel task — skip to avoid double toast
+      if (_bgPoll && panelProdId === prodId && panelMode === taskType) return;
+
+      if (task.status === 'done') {
+        showToast(`✅ ${_TASK_LABELS[taskType] || taskType} pronto!`, false);
+      }
+      // If the panel happens to be open for this task, re-render it
+      if (panelProdId === prodId && panelMode === taskType) {
+        openPanel(panelProdId, panelMode);
+      }
+    });
+  }, 5000);
 
   function _bgSpinner(color, icon, title, subtitle) {
     return `<div style="text-align:center;padding:3rem;color:var(--muted)">
