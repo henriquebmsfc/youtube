@@ -852,10 +852,11 @@ def api_audio_generate(prod_id):
 
 
 def _auto_trigger_srt(prod_id: int):
-    """Background: auto-generate transcription from SRT URL right after audio completes."""
+    """Background: export SRT via GenAIPro API then save as transcription."""
     import json as _json
     import time as _time
-    _time.sleep(1)  # brief delay to ensure the DB write is committed
+    _time.sleep(2)  # brief delay to ensure the DB write is committed
+    result_text = None
     try:
         prod = database.get_production(prod_id)
         if not prod:
@@ -872,30 +873,56 @@ def _auto_trigger_srt(prod_id: int):
             audio_data = _json.loads(audio_task.get("result_text") or "{}")
         except Exception:
             return
-        srt_url   = audio_data.get("subtitle_url", "")
         task_id_a = audio_data.get("task_id", "")
-        # Fallback: fetch subtitle_url from API if not stored
-        if not srt_url and task_id_a:
-            try:
-                r = http_requests.get(f"{GENAIPRO_BASE}/labs/task/{task_id_a}",
-                                      headers=_gp_headers(), timeout=10)
-                d = r.json()
-                srt_url = d.get("subtitle", "")
-                if srt_url:
-                    audio_data["subtitle_url"] = srt_url
-                    database.upsert_task(prod_id, "audio", "done",
-                                         result_text=_json.dumps(audio_data))
-            except Exception:
-                pass
-        if not srt_url:
-            print(f"[Auto-SRT] prod={prod_id}: no SRT URL available, skipping")
+        if not task_id_a:
+            print(f"[Auto-SRT] prod={prod_id}: no task_id in audio result, skipping")
             return
-        resp = http_requests.get(srt_url, timeout=30)
-        resp.raise_for_status()
-        result_text = _srt_to_blocks(resp.text, interval=8)
+
+        # ── Step 1: export SRT via GenAIPro subtitle endpoint ────────────────
+        srt_text = None
+        try:
+            export_resp = http_requests.post(
+                f"{GENAIPRO_BASE}/labs/task/subtitle/{task_id_a}",
+                headers={**_gp_headers(), "Content-Type": "application/json"},
+                json={"max_characters_per_line": 42, "max_lines_per_cue": 2, "max_seconds_per_cue": 7},
+                timeout=30,
+            )
+            if export_resp.status_code == 200:
+                srt_text = export_resp.text
+                print(f"[Auto-SRT] prod={prod_id}: SRT exported via API ({len(srt_text)} chars)")
+            else:
+                print(f"[Auto-SRT] prod={prod_id}: subtitle export HTTP {export_resp.status_code}")
+        except Exception as e:
+            print(f"[Auto-SRT] prod={prod_id}: subtitle export error: {e}")
+
+        # ── Step 2: fallback — download from stored subtitle_url ─────────────
+        if not srt_text:
+            srt_url = audio_data.get("subtitle_url", "")
+            if not srt_url:
+                try:
+                    r = http_requests.get(f"{GENAIPRO_BASE}/labs/task/{task_id_a}",
+                                          headers=_gp_headers(), timeout=10)
+                    srt_url = r.json().get("subtitle", "")
+                except Exception:
+                    pass
+            if srt_url:
+                try:
+                    dl = http_requests.get(srt_url, timeout=30)
+                    dl.raise_for_status()
+                    srt_text = dl.text
+                    print(f"[Auto-SRT] prod={prod_id}: SRT downloaded from URL ({len(srt_text)} chars)")
+                except Exception as e:
+                    print(f"[Auto-SRT] prod={prod_id}: SRT download error: {e}")
+
+        if not srt_text:
+            print(f"[Auto-SRT] prod={prod_id}: could not obtain SRT content, skipping")
+            return
+
+        # ── Step 3: convert & save ────────────────────────────────────────────
+        result_text = _srt_to_blocks(srt_text, interval=8)
         if result_text:
             database.upsert_task(prod_id, "transcription", "done", result_text=result_text)
-            print(f"[Auto-SRT] prod={prod_id}: transcription saved automatically ({len(result_text)} chars)")
+            print(f"[Auto-SRT] prod={prod_id}: transcription saved ({len(result_text)} chars)")
         else:
             print(f"[Auto-SRT] prod={prod_id}: SRT was empty or unrecognised format")
     except Exception as exc:
