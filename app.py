@@ -1279,34 +1279,47 @@ def api_thumbnails_generate(prod_id):
                     f"The image above is the thumbnail of the original English video.\n"
                     f"I am producing an adapted version of this video titled: \"{title}\"\n"
                     + (f"Script excerpt: {script_text[:400]}\n" if script_text else "")
-                    + "\nGenerate 4 DALL-E 3 image prompts for YouTube thumbnails:\n\n"
-                    "PROMPTS 1 & 2 — INSPIRED BY THE SOURCE THUMBNAIL:\n"
-                    "Carefully study the thumbnail's visual style, composition, mood, color palette "
-                    "and main visual elements. Adapt those same qualities to the new title. "
-                    "The result should feel like a natural evolution of the original design.\n\n"
-                    "PROMPTS 3 & 4 — COMPLETELY ORIGINAL:\n"
-                    "Ignore the source thumbnail. Create entirely different visual concepts "
-                    "that are creative, cinematic and highly clickable for the same video title.\n\n"
-                    "ALL 4 prompts must:\n"
-                    "- Be photorealistic, cinematic quality, 16:9 widescreen (1792x1024)\n"
-                    "- Contain NO text, logos, watermarks or letters whatsoever\n"
-                    "- Be vivid and specific about lighting, mood, colors, camera angle\n"
-                    "- Be a complete, self-contained DALL-E 3 image generation prompt\n\n"
-                    "Return ONLY a JSON array of 4 strings (prompts 1–4 in order). No extra text, no markdown."
+                    + """
+Generate 4 DALL-E 3 image prompts for YouTube thumbnails engineered for MAXIMUM CLICK-THROUGH RATE (CTR).
+
+PROMPTS 1 & 2 — INSPIRED BY SOURCE THUMBNAIL:
+Study the source thumbnail's composition, color palette and mood. Adapt those visual qualities to the new title while applying all CTR rules below.
+
+PROMPTS 3 & 4 — COMPLETELY ORIGINAL CONCEPTS:
+Ignore the source thumbnail. Invent bold, distinct visual concepts for the same title.
+
+━━━ HIGH-CTR RULES (mandatory for ALL 4 prompts) ━━━
+FACES & PEOPLE: If the concept includes a human figure, their face must be LARGE (filling 30–50 % of the frame), showing a powerful emotion — awe, shock, fierce determination, or raw menace. Eyes must be sharp, bright and expressive.
+FOCAL POINT: One single dominant subject. No clutter, no busy backgrounds competing for attention.
+CONTRAST: Maximum tonal contrast — dramatically dark background against a brilliant, luminous subject (or inverse). Deep blacks, crisp highlights, punchy midtones.
+COLOR: Hyper-saturated bold palette. Dominant warm tones (molten amber, deep crimson, rich gold) plus one cool accent (cobalt blue, royal purple). Colors must POP against YouTube's light-grey UI.
+LIGHTING: Hard cinematic lighting — blazing rim light, golden-hour warmth, torch/fire glow, or dramatic god-rays. Absolutely no flat or even lighting.
+EMOTION & SCALE: Evoke instant emotion — epic grandeur, imminent danger, forbidden discovery, or breathtaking spectacle. The viewer must feel something in under one second.
+TECHNICAL: Photorealistic, 8 K hyperdetailed, shallow depth of field (subject tack-sharp, background artistically blurred), 16:9 widescreen 1792×1024. STRICTLY NO text, letters, numbers, words, watermarks, logos or any writing anywhere in the image.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Return ONLY a JSON array of 4 strings (prompts 1–4). No markdown, no extra text."""
                 )
             else:
                 # No reference image — 4 original prompts
                 prompt_text = (
-                    f"Create 4 YouTube thumbnail image prompts for a medieval history video.\n"
-                    f"Title: {title}\n"
+                    f"Create 4 DALL-E 3 image prompts for a YouTube thumbnail engineered for MAXIMUM CTR.\n"
+                    f"Video title: \"{title}\"\n"
                     + (f"Script excerpt: {script_text[:600]}\n" if script_text else "")
-                    + "\nRules:\n"
-                    "- Each prompt must describe a dramatically DIFFERENT visual concept\n"
-                    "- Cover different aspects: e.g. battle scene, castle/landscape, character portrait, artifact/map\n"
-                    "- Photorealistic, cinematic quality, 16:9 widescreen composition\n"
-                    "- No text, logos, watermarks or letters in the image\n"
-                    "- Be vivid and specific about lighting, mood, colors, camera angle\n"
-                    "Return ONLY a JSON array of 4 strings. No extra text, no markdown."
+                    + """
+Each of the 4 prompts must describe a COMPLETELY DIFFERENT visual concept (e.g. dramatic human portrait, epic landscape/architecture, powerful artifact close-up, tense action moment).
+
+━━━ HIGH-CTR RULES (mandatory for ALL 4 prompts) ━━━
+FACES & PEOPLE: If the concept includes a human figure, their face must be LARGE (filling 30–50 % of the frame), showing a powerful emotion — awe, shock, fierce determination, or raw menace. Eyes sharp, bright and expressive.
+FOCAL POINT: One single dominant subject. No clutter, no busy backgrounds competing for attention.
+CONTRAST: Maximum tonal contrast — dramatically dark background against a brilliant, luminous subject (or inverse). Deep blacks, crisp highlights, punchy midtones.
+COLOR: Hyper-saturated bold palette. Dominant warm tones (molten amber, deep crimson, rich gold) plus one cool accent (cobalt blue, royal purple). Colors that POP against YouTube's light-grey UI.
+LIGHTING: Hard cinematic lighting — blazing rim light, golden-hour warmth, torch/fire glow, or dramatic god-rays. Absolutely no flat or even lighting.
+EMOTION & SCALE: Evoke instant emotion — epic grandeur, imminent danger, forbidden discovery, or breathtaking spectacle. Viewer must feel something in under one second.
+TECHNICAL: Photorealistic, 8 K hyperdetailed, shallow depth of field (subject tack-sharp, background artistically blurred), 16:9 widescreen 1792×1024. STRICTLY NO text, letters, numbers, words, watermarks, logos or any writing anywhere in the image.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Return ONLY a JSON array of 4 strings. No markdown, no extra text."""
                 )
 
             user_content.append({"type": "text", "text": prompt_text})
@@ -1326,10 +1339,10 @@ def api_thumbnails_generate(prod_id):
         except Exception as _pe:
             print(f"[Thumbnails] Claude prompt error: {_pe} — using fallback prompts")
             thumb_prompts = [
-                "Epic medieval battlefield at dusk, two armies clashing, dramatic low-angle shot, cinematic lighting, photorealistic, 16:9, no text",
-                "Majestic gothic cathedral interior, golden light streaming through stained glass, medieval pilgrims, photorealistic, cinematic, no text",
-                "Close-up portrait of a medieval knight in ornate armor, battle-worn face, dramatic rim lighting, photorealistic, no text",
-                "Ancient illuminated manuscript and relics on a stone table, candlelight, dark moody atmosphere, photorealistic, no text",
+                "Extreme close-up of a medieval knight's weathered face, fierce determined eyes, dramatic hard rim light from below casting deep shadows, molten amber and crimson tones, hyper-saturated, photorealistic 8K, shallow depth of field, 16:9 widescreen, no text no letters no watermarks",
+                "Epic wide shot of a medieval army charging at golden hour, silhouetted warriors backlit by a blazing orange sun low on the horizon, god-rays piercing through dust clouds, maximum contrast dark foreground vs incandescent sky, photorealistic 8K, 16:9, no text no letters",
+                "Towering gothic castle perched on a cliff at night, lit by a ring of torches below and a full moon above, deep cobalt sky vs warm amber firelight, a lone figure standing at the gate, hyperdetailed photorealistic, 16:9, no text no letters",
+                "Close-up of an ancient crown or relic on a stone altar, single shaft of golden light from above illuminating it, deep black background, rich gold and jewel tones hyper-saturated, cinematic shallow depth of field, photorealistic 8K, 16:9, no text no letters",
             ]
         job["prompts"]   = thumb_prompts
         job["phase"]     = "images"
