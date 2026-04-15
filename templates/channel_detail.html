@@ -1338,13 +1338,10 @@
     });
     bootstrap.Modal.getInstance(document.getElementById('modalTask')).hide();
 
-    // When posting task is marked done → auto-move to posted tab
+    // When posting task is marked done → auto-move to posted (stay on current tab)
     if (activeTask.task_type === 'posting' && status === 'done') {
       await fetch(`/api/productions/${activeTask.prod_id}/mark-posted`, { method:'POST' });
-      showToast('✅ Vídeo marcado como postado!', false);
-      currentTab = 'posted';
-      document.getElementById('tabActive').classList.remove('active');
-      document.getElementById('tabPosted').classList.add('active');
+      showToast('✅ Vídeo postado! Movido para a aba Postados.', false);
     } else {
       showToast('✅ Tarefa atualizada!', false);
     }
@@ -1353,10 +1350,7 @@
 
   async function reactivateProd(id) {
     await fetch(`/api/productions/${id}/mark-active`, { method:'POST' });
-    showToast('↩️ Vídeo reativado!', false);
-    currentTab = 'active';
-    document.getElementById('tabActive').classList.add('active');
-    document.getElementById('tabPosted').classList.remove('active');
+    showToast('↩️ Vídeo reativado! Voltou para Em Produção.', false);
     loadProductions();
   }
 
