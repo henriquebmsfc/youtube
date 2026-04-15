@@ -1289,13 +1289,14 @@ PROMPTS 3 & 4 — COMPLETELY ORIGINAL CONCEPTS:
 Ignore the source thumbnail. Invent bold, distinct visual concepts for the same title.
 
 ━━━ HIGH-CTR RULES (mandatory for ALL 4 prompts) ━━━
-FACES & PEOPLE: If the concept includes a human figure, their face must be LARGE (filling 30–50 % of the frame), showing a powerful emotion — awe, shock, fierce determination, or raw menace. Eyes must be sharp, bright and expressive.
+FACES & PEOPLE: If the concept includes a human figure, their face must be LARGE (filling 30–50 % of the frame), showing a powerful emotion — awe, shock, fierce determination, or raw menace. Eyes sharp, bright and expressive. Skin must show real human texture: visible pores, subtle imperfections, natural weathering — NOT plastic, NOT wax, NOT CGI doll-like. Think a real actor photographed by a professional cinematographer.
 FOCAL POINT: One single dominant subject. No clutter, no busy backgrounds competing for attention.
 CONTRAST: Maximum tonal contrast — dramatically dark background against a brilliant, luminous subject (or inverse). Deep blacks, crisp highlights, punchy midtones.
-COLOR: Hyper-saturated bold palette. Dominant warm tones (molten amber, deep crimson, rich gold) plus one cool accent (cobalt blue, royal purple). Colors must POP against YouTube's light-grey UI.
+COLOR: Hyper-saturated bold palette. Dominant warm tones (molten amber, deep crimson, rich gold) plus one cool accent (cobalt blue, royal purple). Colors that POP against YouTube's light-grey UI.
 LIGHTING: Hard cinematic lighting — blazing rim light, golden-hour warmth, torch/fire glow, or dramatic god-rays. Absolutely no flat or even lighting.
-EMOTION & SCALE: Evoke instant emotion — epic grandeur, imminent danger, forbidden discovery, or breathtaking spectacle. The viewer must feel something in under one second.
-TECHNICAL: Photorealistic, 8 K hyperdetailed, shallow depth of field (subject tack-sharp, background artistically blurred), 16:9 widescreen 1792×1024. STRICTLY NO text, letters, numbers, words, watermarks, logos or any writing anywhere in the image.
+EMOTION & SCALE: Evoke instant emotion — epic grandeur, imminent danger, forbidden discovery, or breathtaking spectacle. Viewer must feel something in under one second.
+PHOTOREALISM: RAW photograph aesthetic. Shot on Canon EOS R5 with 85mm f/1.4 lens. Natural film grain, true-to-life material textures (rough stone, worn leather, aged metal, real fabric weave). Everything must look physically real and tangible — NOT rendered, NOT illustrated, NOT 3D CGI.
+TECHNICAL: 8K hyperdetailed, shallow depth of field (subject tack-sharp, background artistically blurred), 16:9 widescreen 1792×1024. STRICTLY NO text, letters, numbers, words, watermarks, logos or any writing anywhere in the image.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Return ONLY a JSON array of 4 strings (prompts 1–4). No markdown, no extra text."""
@@ -1339,10 +1340,10 @@ Return ONLY a JSON array of 4 strings. No markdown, no extra text."""
         except Exception as _pe:
             print(f"[Thumbnails] Claude prompt error: {_pe} — using fallback prompts")
             thumb_prompts = [
-                "Extreme close-up of a medieval knight's weathered face, fierce determined eyes, dramatic hard rim light from below casting deep shadows, molten amber and crimson tones, hyper-saturated, photorealistic 8K, shallow depth of field, 16:9 widescreen, no text no letters no watermarks",
-                "Epic wide shot of a medieval army charging at golden hour, silhouetted warriors backlit by a blazing orange sun low on the horizon, god-rays piercing through dust clouds, maximum contrast dark foreground vs incandescent sky, photorealistic 8K, 16:9, no text no letters",
-                "Towering gothic castle perched on a cliff at night, lit by a ring of torches below and a full moon above, deep cobalt sky vs warm amber firelight, a lone figure standing at the gate, hyperdetailed photorealistic, 16:9, no text no letters",
-                "Close-up of an ancient crown or relic on a stone altar, single shaft of golden light from above illuminating it, deep black background, rich gold and jewel tones hyper-saturated, cinematic shallow depth of field, photorealistic 8K, 16:9, no text no letters",
+                "Extreme close-up RAW photograph of a real medieval knight's weathered face, fierce determined eyes, dramatic hard rim light casting deep shadows, visible skin pores and battle scars, natural skin texture NOT plastic NOT wax, molten amber and crimson tones, hyper-saturated, shot on Canon EOS R5 85mm f/1.4, shallow depth of field, 16:9 widescreen, no text no letters no watermarks",
+                "Epic RAW photograph of a medieval army charging at golden hour, silhouetted real warriors backlit by a blazing orange sun, god-rays piercing dust clouds, maximum contrast dark foreground vs incandescent sky, natural film grain, photorealistic 8K, 16:9, no text no letters no watermarks",
+                "Towering gothic castle on a cliff at night, ring of torches below and full moon above, deep cobalt sky vs warm amber firelight, lone real human figure at the gate, rough stone texture visible, hyperdetailed RAW photograph, 16:9, no text no letters no watermarks",
+                "Close-up RAW photograph of an ancient crown on a stone altar, single shaft of golden light from above, deep black background, real metal texture with age patina, jewel tones hyper-saturated, film grain, shallow depth of field, 8K, 16:9, no text no letters no watermarks",
             ]
         job["prompts"]   = thumb_prompts
         job["phase"]     = "images"
