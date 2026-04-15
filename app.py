@@ -449,7 +449,8 @@ def api_productions_list():
     channel_id = request.args.get("channel_id", type=int)
     if not channel_id:
         return jsonify({"error": "channel_id obrigatório"}), 400
-    return jsonify(database.get_productions(channel_id))
+    status = request.args.get("status", "active")
+    return jsonify(database.get_productions(channel_id, status))
 
 
 @app.route("/api/productions", methods=["POST"])
@@ -482,6 +483,22 @@ def api_production_get(prod_id):
 @app.route("/api/productions/<int:prod_id>", methods=["DELETE"])
 def api_productions_delete(prod_id):
     database.delete_production(prod_id)
+    return jsonify({"success": True})
+
+
+@app.route("/api/productions/<int:prod_id>/mark-posted", methods=["POST"])
+def api_production_mark_posted(prod_id):
+    if not database.get_production(prod_id):
+        return jsonify({"error": "Produção não encontrada"}), 404
+    database.mark_production_posted(prod_id)
+    return jsonify({"success": True})
+
+
+@app.route("/api/productions/<int:prod_id>/mark-active", methods=["POST"])
+def api_production_mark_active(prod_id):
+    if not database.get_production(prod_id):
+        return jsonify({"error": "Produção não encontrada"}), 404
+    database.mark_production_active(prod_id)
     return jsonify({"success": True})
 
 

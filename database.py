@@ -332,15 +332,15 @@ def create_production(channel_id: int, source_url: str, source_title: str = "",
     return prod_id
 
 
-def get_productions(channel_id: int) -> list:
+def get_productions(channel_id: int, status: str = "active") -> list:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
     c.execute('''
         SELECT * FROM productions
-        WHERE channel_id = ? AND status = "active"
+        WHERE channel_id = ? AND status = ?
         ORDER BY created_at DESC
-    ''', (channel_id,))
+    ''', (channel_id, status))
     prods = [dict(r) for r in c.fetchall()]
     for p in prods:
         c.execute(
@@ -374,6 +374,22 @@ def get_production(production_id: int) -> dict | None:
 def delete_production(production_id: int):
     conn = sqlite3.connect(DB_PATH)
     conn.execute('DELETE FROM productions WHERE id = ?', (production_id,))
+    conn.commit()
+    conn.close()
+
+
+def mark_production_posted(production_id: int):
+    """Move a production to the 'posted' archive."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("UPDATE productions SET status='posted' WHERE id=?", (production_id,))
+    conn.commit()
+    conn.close()
+
+
+def mark_production_active(production_id: int):
+    """Restore a posted production back to active."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("UPDATE productions SET status='active' WHERE id=?", (production_id,))
     conn.commit()
     conn.close()
 

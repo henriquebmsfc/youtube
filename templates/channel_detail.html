@@ -39,6 +39,13 @@
     .prod-source { font-size:.75rem; color:var(--muted); margin-top:.2rem; }
     .prod-body { padding:.75rem 1rem; }
 
+    /* ── Production tabs ── */
+    .prod-tab { background:none; border:none; border-bottom:2px solid transparent; color:var(--muted); padding:.55rem 1.1rem; font-size:.85rem; font-weight:500; cursor:pointer; transition:all .15s; display:inline-flex; align-items:center; gap:.35rem; }
+    .prod-tab:hover { color:var(--text); }
+    .prod-tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+    .prod-tab .tab-count { background:rgba(139,148,158,.18); border-radius:10px; padding:.05rem .45rem; font-size:.7rem; font-weight:700; }
+    .prod-tab.active .tab-count { background:rgba(247,129,102,.18); color:var(--accent); }
+
     /* ── Task buttons ── */
     .task-bar { display:flex; gap:.5rem; flex-wrap:wrap; }
     .task-btn {
@@ -171,6 +178,17 @@
 </div>
 
 <main style="padding:1.5rem;max-width:1100px;margin:0 auto">
+  <!-- Tab bar -->
+  <div style="display:flex;border-bottom:1px solid var(--border);margin-bottom:1.25rem">
+    <button class="prod-tab active" id="tabActive" onclick="switchTab('active')">
+      <i class="bi bi-play-circle"></i> Em Produção
+      <span class="tab-count" id="tabActiveCount">0</span>
+    </button>
+    <button class="prod-tab" id="tabPosted" onclick="switchTab('posted')">
+      <i class="bi bi-check2-circle"></i> Postados
+      <span class="tab-count" id="tabPostedCount">0</span>
+    </button>
+  </div>
   <div id="prodList">
     <div class="empty-state"><div class="ei">⏳</div><div>Carregando…</div></div>
   </div>
@@ -287,6 +305,7 @@
   };
 
   let productions   = [];
+  let currentTab    = 'active';   // 'active' | 'posted'
   let panelProdId   = null;
   let panelMode     = null;   // 'script' | 'audio' | 'transcription' | 'description' | 'prompts' | 'thumbnails'
   let activeTask    = null;
@@ -298,27 +317,75 @@
 
   // ── Load ─────────────────────────────────────────────────────────────────
   async function loadProductions() {
-    const data = await fetch(`/api/productions?channel_id=${CHANNEL_ID}`).then(r => r.json());
-    productions = Array.isArray(data) ? data : [];
+    const [activeData, postedData] = await Promise.all([
+      fetch(`/api/productions?channel_id=${CHANNEL_ID}&status=active`).then(r => r.json()),
+      fetch(`/api/productions?channel_id=${CHANNEL_ID}&status=posted`).then(r => r.json()),
+    ]);
+    const activeList = Array.isArray(activeData) ? activeData : [];
+    const postedList = Array.isArray(postedData) ? postedData : [];
+    // Update tab counts
+    document.getElementById('tabActiveCount').textContent = activeList.length;
+    document.getElementById('tabPostedCount').textContent = postedList.length;
+    // Store by current tab
+    productions = currentTab === 'posted' ? postedList : activeList;
     document.getElementById('prodCount').textContent =
       productions.length ? `${productions.length} vídeo(s)` : '';
     renderProductions();
   }
 
+  function switchTab(tab) {
+    currentTab = tab;
+    document.getElementById('tabActive').classList.toggle('active', tab === 'active');
+    document.getElementById('tabPosted').classList.toggle('active', tab === 'posted');
+    loadProductions();
+  }
+
   function renderProductions() {
     const list = document.getElementById('prodList');
     if (!productions.length) {
-      list.innerHTML = `<div class="empty-state"><div class="ei">🎬</div>
-        <div>Nenhum vídeo em produção ainda</div>
-        <div style="margin-top:.5rem;font-size:.85rem">Clique em <strong>Adicionar por URL</strong> ou use o botão nos cards do Analisador</div>
-      </div>`;
+      const emptyMsg = currentTab === 'posted'
+        ? '<div>Nenhum vídeo postado ainda</div><div style="margin-top:.5rem;font-size:.85rem">Quando marcar um vídeo como postado ele aparece aqui.</div>'
+        : '<div>Nenhum vídeo em produção ainda</div><div style="margin-top:.5rem;font-size:.85rem">Clique em <strong>Adicionar por URL</strong> ou use o botão nos cards do Analisador</div>';
+      list.innerHTML = `<div class="empty-state"><div class="ei">${currentTab === 'posted' ? '✅' : '🎬'}</div>${emptyMsg}</div>`;
       return;
     }
     list.innerHTML = productions.map(p => {
       const tasks    = p.tasks || {};
       const taskKeys = Object.keys(TASK_META);
       const doneCount = taskKeys.filter(k => tasks[k]?.status === 'done').length;
-      const taskBtns  = taskKeys.map(k => {
+      const pct = Math.round(doneCount / taskKeys.length * 100);
+
+      if (currentTab === 'posted') {
+        // ── Postados: compact read-only card ─────────────────────────────────
+        return `
+          <div class="prod-card" id="prod-${p.id}" style="opacity:.85">
+            <div class="prod-header">
+              ${p.source_thumbnail
+                ? `<img src="${esc(p.source_thumbnail)}" class="prod-thumb" onerror="this.style.display='none'">`
+                : '<div class="prod-thumb" style="display:flex;align-items:center;justify-content:center;color:var(--muted)"><i class="bi bi-camera-video" style="font-size:1.5rem"></i></div>'}
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;gap:.4rem">
+                  <div class="prod-title" style="flex:1;min-width:0">${esc(p.adapted_title || p.source_title)}</div>
+                  <span style="font-size:.7rem;background:rgba(63,185,80,.15);color:var(--green);border:1px solid rgba(63,185,80,.3);border-radius:20px;padding:.15rem .55rem;flex-shrink:0">✅ Postado</span>
+                </div>
+                <div class="prod-source"><i class="bi bi-person-circle"></i> ${esc(p.source_channel)}
+                  &nbsp;·&nbsp; <a href="${esc(p.source_url)}" target="_blank" style="color:var(--blue)">Ver original <i class="bi bi-box-arrow-up-right"></i></a>
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:.35rem;flex-shrink:0">
+                <button class="btn-outline" onclick="reactivateProd(${p.id})" title="Mover de volta para Em Produção" style="font-size:.75rem;padding:.3rem .6rem">
+                  <i class="bi bi-arrow-counterclockwise"></i> Reativar
+                </button>
+                <button class="btn-danger" onclick="deleteProd(${p.id})" title="Remover">
+                  <i class="bi bi-trash3"></i>
+                </button>
+              </div>
+            </div>
+          </div>`;
+      }
+
+      // ── Em Produção: full card ────────────────────────────────────────────
+      const taskBtns = taskKeys.map(k => {
         const m = TASK_META[k];
         const t = tasks[k] || { status:'pending' };
         return `<button class="task-btn ${t.status}"
@@ -329,7 +396,6 @@
                   ${t.status==='in_progress' ? '<i class="bi bi-hourglass-split spinning"></i>' : ''}
                 </button>`;
       }).join('');
-      const pct = Math.round(doneCount / taskKeys.length * 100);
       return `
         <div class="prod-card" id="prod-${p.id}">
           <div class="prod-header">
@@ -1271,7 +1337,26 @@
       body: JSON.stringify({ status, notes }),
     });
     bootstrap.Modal.getInstance(document.getElementById('modalTask')).hide();
-    showToast('✅ Tarefa atualizada!', false);
+
+    // When posting task is marked done → auto-move to posted tab
+    if (activeTask.task_type === 'posting' && status === 'done') {
+      await fetch(`/api/productions/${activeTask.prod_id}/mark-posted`, { method:'POST' });
+      showToast('✅ Vídeo marcado como postado!', false);
+      currentTab = 'posted';
+      document.getElementById('tabActive').classList.remove('active');
+      document.getElementById('tabPosted').classList.add('active');
+    } else {
+      showToast('✅ Tarefa atualizada!', false);
+    }
+    loadProductions();
+  }
+
+  async function reactivateProd(id) {
+    await fetch(`/api/productions/${id}/mark-active`, { method:'POST' });
+    showToast('↩️ Vídeo reativado!', false);
+    currentTab = 'active';
+    document.getElementById('tabActive').classList.add('active');
+    document.getElementById('tabPosted').classList.remove('active');
     loadProductions();
   }
 
