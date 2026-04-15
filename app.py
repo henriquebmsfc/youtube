@@ -555,23 +555,31 @@ def api_translate_title_options():
         f'  {{"text": "<title in {lang_name}>", "pt": "<brief explanation in Portuguese>"}}\n'
         f'No markdown, no extra text, just the JSON array.'
     )
-    try:
-        client = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-        with client.messages.stream(
-            model=CLAUDE_MODEL, max_tokens=600,
-            messages=[{"role": "user", "content": user_msg}],
-        ) as stream:
-            raw = stream.get_final_text().strip()
-        raw = re.sub(r'^```(?:json)?\s*', '', raw)
-        raw = re.sub(r'\s*```$', '', raw).strip()
-        options = _json.loads(raw)
-        if not isinstance(options, list):
-            raise ValueError("Expected list")
-        options = options[:4]
-        return jsonify({"options": options})
-    except Exception as e:
-        print(f"[TranslateOptions] error: {e}")
-        return jsonify({"options": [], "error": str(e)}), 500
+    import time as _time
+    client = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    last_err = None
+    for attempt in range(3):
+        try:
+            if attempt > 0:
+                _time.sleep(2 * attempt)  # 2s, 4s between retries
+            with client.messages.stream(
+                model=CLAUDE_MODEL, max_tokens=600,
+                messages=[{"role": "user", "content": user_msg}],
+            ) as stream:
+                raw = stream.get_final_text().strip()
+            raw = re.sub(r'^```(?:json)?\s*', '', raw)
+            raw = re.sub(r'\s*```$', '', raw).strip()
+            options = _json.loads(raw)
+            if not isinstance(options, list):
+                raise ValueError("Expected list")
+            return jsonify({"options": options[:4]})
+        except Exception as e:
+            last_err = e
+            print(f"[TranslateOptions] attempt {attempt+1} error: {e}")
+            # Only retry on Anthropic 5xx errors; fail fast on others
+            if "500" not in str(e) and "529" not in str(e) and "overloaded" not in str(e).lower():
+                break
+    return jsonify({"options": [], "error": str(last_err)}), 500
 
 
 @app.route("/api/productions/<int:prod_id>/tasks/<task_type>", methods=["PATCH"])
