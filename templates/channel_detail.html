@@ -693,7 +693,7 @@
           <div class="info-row"><i class="bi bi-check-circle-fill" style="color:var(--green)"></i> <strong>Áudio gerado com sucesso</strong></div>
           <audio controls src="${esc(audioUrl)}"></audio>
           <div style="margin-top:.5rem;display:flex;gap:.5rem">
-            <a href="${esc(audioUrl)}" download class="btn-outline" style="font-size:.78rem">
+            <a href="/api/productions/${panelProdId}/tasks/audio/download" class="btn-outline" style="font-size:.78rem">
               <i class="bi bi-download"></i> Baixar MP3
             </a>
           </div>

@@ -1010,6 +1010,48 @@ def _auto_trigger_description(prod_id: int):
         print(f"[Auto-Desc] prod={prod_id} error: {exc}")
 
 
+@app.route("/api/productions/<int:prod_id>/tasks/audio/download")
+def api_audio_download(prod_id):
+    """Proxy-download the MP3 from GenAIPro so the browser saves it with the video title."""
+    import json as _json, re as _re
+    prod = database.get_production(prod_id)
+    if not prod:
+        return jsonify({"error": "Produção não encontrada"}), 404
+
+    try:
+        audio_data = _json.loads((prod.get("tasks") or {}).get("audio", {}).get("result_text", "{}"))
+    except Exception:
+        audio_data = {}
+
+    audio_url = audio_data.get("audio_url", "")
+    if not audio_url:
+        return jsonify({"error": "URL de áudio não disponível"}), 404
+
+    # Build a safe filename from the video title
+    raw_title = (prod.get("adapted_title") or prod.get("source_title") or f"audio_{prod_id}").strip()
+    safe_title = _re.sub(r'[\\/:*?"<>|]', '', raw_title)   # strip Windows-invalid chars
+    safe_title = _re.sub(r'\s+', ' ', safe_title).strip() or f"audio_{prod_id}"
+    filename = safe_title + ".mp3"
+
+    r = http_requests.get(audio_url, stream=True, timeout=60)
+    r.raise_for_status()
+
+    from flask import Response, stream_with_context
+    def generate():
+        for chunk in r.iter_content(chunk_size=65536):
+            if chunk:
+                yield chunk
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Content-Type": r.headers.get("Content-Type", "audio/mpeg"),
+    }
+    if "Content-Length" in r.headers:
+        headers["Content-Length"] = r.headers["Content-Length"]
+
+    return Response(stream_with_context(generate()), headers=headers)
+
+
 @app.route("/api/productions/<int:prod_id>/tasks/audio/status/<task_id>")
 def api_audio_status(prod_id, task_id):
     import json as _json
