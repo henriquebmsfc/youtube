@@ -112,6 +112,31 @@ _LANG_MAP = {
 _thumbnail_jobs: dict = {}   # job_id → {status, urls, error, prompt}
 _claude_jobs:    dict = {}   # job_id → {prod_id, task_type, status, error, style}
 
+# ── Persistent media cache (thumbnails + audio) ───────────────────────────────
+MEDIA_DIR = os.path.join(config.DB_DIR, "media")
+os.makedirs(os.path.join(MEDIA_DIR, "thumbs"), exist_ok=True)
+os.makedirs(os.path.join(MEDIA_DIR, "audio"),  exist_ok=True)
+
+
+def _media_thumb_path(prod_id: int, index: int) -> str:
+    return os.path.join(MEDIA_DIR, "thumbs", f"{prod_id}_{index}.png")
+
+
+def _media_audio_path(prod_id: int) -> str:
+    return os.path.join(MEDIA_DIR, "audio", f"{prod_id}.mp3")
+
+
+def _cleanup_media(prod_id: int):
+    """Remove cached thumbnails and audio for a deleted/reset production."""
+    import glob as _glob
+    for f in _glob.glob(os.path.join(MEDIA_DIR, "thumbs", f"{prod_id}_*.png")):
+        try: os.remove(f)
+        except Exception: pass
+    ap = _media_audio_path(prod_id)
+    if os.path.exists(ap):
+        try: os.remove(ap)
+        except Exception: pass
+
 def _gp_headers():
     return {"Authorization": f"Bearer {config.GENAIPRO_API_KEY}"}
 
@@ -420,6 +445,13 @@ def channel_detail_page(channel_id):
     return render_template("channel_detail.html", channel=channel, config=config)
 
 
+@app.route("/api/media/<path:filename>")
+def serve_media(filename):
+    """Serve locally cached thumbnails and audio files."""
+    from flask import send_from_directory
+    return send_from_directory(MEDIA_DIR, filename)
+
+
 @app.route("/api/channels", methods=["GET"])
 def api_channels_list():
     return jsonify(database.get_channels())
@@ -482,6 +514,7 @@ def api_production_get(prod_id):
 
 @app.route("/api/productions/<int:prod_id>", methods=["DELETE"])
 def api_productions_delete(prod_id):
+    _cleanup_media(prod_id)
     database.delete_production(prod_id)
     return jsonify({"success": True})
 
@@ -1012,8 +1045,9 @@ def _auto_trigger_description(prod_id: int):
 
 @app.route("/api/productions/<int:prod_id>/tasks/audio/download")
 def api_audio_download(prod_id):
-    """Proxy-download the MP3 from GenAIPro so the browser saves it with the video title."""
+    """Serve the cached MP3 (or download+cache from GenAIPro on first request)."""
     import json as _json, re as _re
+    from flask import send_file, Response, stream_with_context
     prod = database.get_production(prod_id)
     if not prod:
         return jsonify({"error": "Produção não encontrada"}), 404
@@ -1023,33 +1057,42 @@ def api_audio_download(prod_id):
     except Exception:
         audio_data = {}
 
+    # Build a safe filename from the video title
+    raw_title = (prod.get("adapted_title") or prod.get("source_title") or f"audio_{prod_id}").strip()
+    safe_title = _re.sub(r'[\\/:*?"<>|]', '', raw_title)
+    safe_title = _re.sub(r'\s+', ' ', safe_title).strip() or f"audio_{prod_id}"
+    filename = safe_title + ".mp3"
+
+    local_path = _media_audio_path(prod_id)
+
+    # Serve from local cache if available
+    if os.path.exists(local_path):
+        return send_file(local_path, as_attachment=True, download_name=filename, mimetype="audio/mpeg")
+
+    # Otherwise download from GenAIPro, cache, then serve
     audio_url = audio_data.get("audio_url", "")
     if not audio_url:
         return jsonify({"error": "URL de áudio não disponível"}), 404
 
-    # Build a safe filename from the video title
-    raw_title = (prod.get("adapted_title") or prod.get("source_title") or f"audio_{prod_id}").strip()
-    safe_title = _re.sub(r'[\\/:*?"<>|]', '', raw_title)   # strip Windows-invalid chars
-    safe_title = _re.sub(r'\s+', ' ', safe_title).strip() or f"audio_{prod_id}"
-    filename = safe_title + ".mp3"
-
-    r = http_requests.get(audio_url, stream=True, timeout=60)
+    r = http_requests.get(audio_url, timeout=120)
     r.raise_for_status()
 
-    from flask import Response, stream_with_context
-    def generate():
-        for chunk in r.iter_content(chunk_size=65536):
-            if chunk:
-                yield chunk
-
-    headers = {
-        "Content-Disposition": f'attachment; filename="{filename}"',
-        "Content-Type": r.headers.get("Content-Type", "audio/mpeg"),
-    }
-    if "Content-Length" in r.headers:
-        headers["Content-Length"] = r.headers["Content-Length"]
-
-    return Response(stream_with_context(generate()), headers=headers)
+    # Save to cache
+    try:
+        with open(local_path, "wb") as _f:
+            _f.write(r.content)
+        return send_file(local_path, as_attachment=True, download_name=filename, mimetype="audio/mpeg")
+    except Exception as _cache_err:
+        print(f"[Audio cache] write error: {_cache_err} — streaming directly")
+        # Fallback: stream directly without caching
+        def _gen():
+            yield r.content
+        headers = {
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Type": r.headers.get("Content-Type", "audio/mpeg"),
+            "Content-Length": str(len(r.content)),
+        }
+        return Response(_gen(), headers=headers)
 
 
 @app.route("/api/productions/<int:prod_id>/tasks/audio/status/<task_id>")
@@ -1458,10 +1501,20 @@ Return ONLY a JSON array of 4 strings. No markdown, no extra text."""
                     quality="hd",
                     n=1,
                 )
-                url = resp.data[0].url
-                urls.append(url)
+                ext_url = resp.data[0].url
+                # Download and cache locally so the image persists beyond the ~1h OpenAI URL expiry
+                local_path = _media_thumb_path(prod_id, i)
+                try:
+                    img_bytes = http_requests.get(ext_url, timeout=60).content
+                    with open(local_path, "wb") as _f:
+                        _f.write(img_bytes)
+                    serve_url = f"/api/media/thumbs/{prod_id}_{i}.png"
+                    print(f"[DALL-E] {i+1}/{len(thumb_prompts)} cached locally prod={prod_id}")
+                except Exception as _dl_err:
+                    print(f"[DALL-E] cache error for image {i+1}: {_dl_err} — using external URL")
+                    serve_url = ext_url
+                urls.append(serve_url)
                 job["done"] = i + 1
-                print(f"[DALL-E] {i+1}/{len(thumb_prompts)} done prod={prod_id}")
             except Exception as _ie:
                 print(f"[DALL-E] image {i+1} error: {_ie}")
                 urls.append(None)

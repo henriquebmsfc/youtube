@@ -1317,9 +1317,9 @@
           ${label}
           <div class="thumb-item">
             <img src="${esc(url)}" alt="Thumbnail ${i+1}" loading="lazy"
-                 onerror="this.closest('.thumb-item').innerHTML='<div style=\'padding:.5rem;font-size:.75rem;color:var(--muted)\'>⚠️ URL expirada — regenere</div>'">
-            <a href="${esc(url)}" target="_blank" class="thumb-dl">
-              <i class="bi bi-box-arrow-up-right"></i> Abrir
+                 onerror="this.closest('.thumb-item').innerHTML='<div style=\'padding:.5rem;font-size:.75rem;color:var(--muted)\'>⚠️ Imagem não encontrada — regenere</div>'">
+            <a href="${esc(url)}" download class="thumb-dl">
+              <i class="bi bi-download"></i> Baixar
             </a>
           </div>
           ${existingPrompts[i] ? `
@@ -1349,7 +1349,7 @@
           <i class="bi bi-check-circle-fill" style="color:var(--green)"></i>
           <strong>${existingUrls.length} thumbnails geradas com DALL-E 3</strong>
           ${refNote}
-          <div style="font-size:.71rem;color:var(--muted);margin-top:.2rem">⚠️ URLs expiram em ~1h — abra e salve as imagens que quiser usar</div>
+          <div style="font-size:.71rem;color:var(--muted);margin-top:.2rem">💾 Imagens salvas no servidor — disponíveis até o vídeo ser excluído</div>
         </div>
         <div class="thumb-grid">${grid}</div>`;
       foot.innerHTML = `
