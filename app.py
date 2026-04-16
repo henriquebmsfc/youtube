@@ -1113,6 +1113,21 @@ def api_audio_status(prod_id, task_id):
                                  }))
             # Auto-trigger SRT / transcription in background
             threading.Thread(target=_auto_trigger_srt, args=(prod_id,), daemon=True).start()
+            # Auto-cache audio file locally so it persists without user interaction
+            def _cache_audio(pid, url):
+                local = _media_audio_path(pid)
+                if os.path.exists(local):
+                    return  # already cached
+                try:
+                    resp = http_requests.get(url, timeout=180)
+                    resp.raise_for_status()
+                    with open(local, "wb") as _f:
+                        _f.write(resp.content)
+                    print(f"[Audio cache] prod={pid} saved ({len(resp.content)//1024}KB)")
+                except Exception as _ce:
+                    print(f"[Audio cache] prod={pid} error: {_ce}")
+            if mp3_url:
+                threading.Thread(target=_cache_audio, args=(prod_id, mp3_url), daemon=True).start()
         return jsonify(data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
