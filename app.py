@@ -1173,6 +1173,59 @@ def api_description_generate(prod_id):
     return jsonify({"queued": True})
 
 
+@app.route("/api/productions/<int:prod_id>/tasks/prompts/reprompt", methods=["POST"])
+def api_prompts_reprompt(prod_id):
+    """Regenerate specific failed prompt numbers with new policy-compliant versions."""
+    import anthropic as _anthropic
+    prod = database.get_production(prod_id)
+    if not prod:
+        return jsonify({"error": "Produção não encontrada"}), 404
+
+    tasks = prod.get("tasks") or {}
+    existing_prompts = tasks.get("prompts", {}).get("result_text", "")
+    if not existing_prompts:
+        return jsonify({"error": "Gere os prompts primeiro"}), 400
+
+    body = request.get_json(force=True)
+    numbers = body.get("numbers", [])
+    if not numbers or not isinstance(numbers, list):
+        return jsonify({"error": "Informe os números dos prompts a regerar"}), 400
+    numbers = [int(n) for n in numbers if str(n).strip().isdigit()]
+    if not numbers:
+        return jsonify({"error": "Números inválidos"}), 400
+
+    nums_str = ", ".join(str(n) for n in sorted(numbers))
+    user_msg = (
+        f"Abaixo estão todos os prompts gerados anteriormente para este projeto.\n\n"
+        f"{existing_prompts}\n\n"
+        f"═══════════════════════════════════════\n"
+        f"Os seguintes prompts foram REPROVADOS pelo Veo3 por violação de políticas: {nums_str}\n\n"
+        f"Regenere APENAS esses prompts ({nums_str}) com versões novas e completamente conformes.\n"
+        f"Regras obrigatórias para os novos prompts:\n"
+        f"- Sem personagens identificáveis, sem rostos, sem atores\n"
+        f"- Sem violência explícita — reescrever como cena épica distante, artefato simbólico ou ambiente atmosférico\n"
+        f"- Sem conteúdo sensível — reformular de forma implícita e artística\n"
+        f"- Manter o timestamp e a essência narrativa do prompt original\n"
+        f"- Seguir exatamente o formato PROMPT [Nº] [] | [TIMESTAMP]: ...\n\n"
+        f"Retorne APENAS os prompts regerados ({nums_str}), mantendo a numeração original. "
+        f"Não inclua os outros prompts nem texto extra."
+    )
+
+    try:
+        client = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        with client.messages.stream(
+            model=CLAUDE_MODEL,
+            max_tokens=_model_max_tokens(CLAUDE_MODEL),
+            system=DOTTI_SYSTEM,
+            messages=[{"role": "user", "content": user_msg}],
+        ) as stream:
+            result = stream.get_final_text()
+        return jsonify({"result": result, "numbers": numbers})
+    except Exception as e:
+        print(f"[Reprompt] prod={prod_id} error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/productions/<int:prod_id>/tasks/prompts/generate", methods=["POST"])
 def api_prompts_generate(prod_id):
     prod = database.get_production(prod_id)

@@ -1085,6 +1085,35 @@
         <div class="section-sep"></div>
         <div style="font-size:.78rem;color:var(--muted);margin-bottom:.4rem">Prompts Veo3 gerados pelo agente DOTTI</div>
         <textarea id="promptsArea" class="panel-ta" style="min-height:400px">${esc(promptTask.result_text)}</textarea>`;
+      body.innerHTML += `
+        <div class="section-sep" style="margin-top:1rem"></div>
+        <div style="margin-top:.75rem">
+          <div style="font-size:.75rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.5rem">
+            <i class="bi bi-arrow-repeat" style="color:var(--yellow)"></i> Regerar prompts reprovados
+          </div>
+          <div style="font-size:.78rem;color:var(--muted);margin-bottom:.5rem">
+            Informe os números dos prompts que o Veo3 reprovou (ex: <code style="background:rgba(255,255,255,.07);padding:.1rem .3rem;border-radius:3px">3, 7, 12</code>)
+          </div>
+          <div style="display:flex;gap:.4rem;margin-bottom:.5rem">
+            <input id="repromptNums" type="text" placeholder="ex: 3, 7, 12"
+                   class="form-dark" style="flex:1;font-size:.83rem"
+                   onkeydown="if(event.key==='Enter')runReprompt()">
+            <button class="btn-accent" id="repromptBtn" onclick="runReprompt()" style="flex-shrink:0">
+              <i class="bi bi-stars"></i> Regerar
+            </button>
+          </div>
+          <div id="repromptResult" style="display:none">
+            <div style="font-size:.72rem;color:var(--muted);margin-bottom:.3rem">Novos prompts — copie e substitua no arquivo principal:</div>
+            <div style="position:relative">
+              <textarea id="repromptArea" class="panel-ta" style="min-height:200px;font-size:.78rem"></textarea>
+              <div style="position:absolute;top:.4rem;right:.4rem;display:flex;gap:.3rem">
+                <button onclick="copyPanelText('repromptArea')" class="btn-outline" style="font-size:.72rem;padding:.25rem .5rem"><i class="bi bi-clipboard"></i> Copiar</button>
+                <button onclick="savePanelText('repromptArea','reprompts_veo3')" class="btn-outline" style="font-size:.72rem;padding:.25rem .5rem"><i class="bi bi-download"></i> TXT</button>
+              </div>
+            </div>
+          </div>
+          <div id="repromptError" style="display:none;font-size:.78rem;color:var(--red);margin-top:.3rem"></div>
+        </div>`;
       foot.innerHTML = `
         <button class="btn-accent" id="genPromptsBtn" onclick="generatePrompts()" ${!hasScript ? 'disabled' : ''}>
           <i class="bi bi-arrow-repeat"></i> Regerar Prompts
@@ -1104,6 +1133,52 @@
         <button class="btn-accent" id="genPromptsBtn" onclick="generatePrompts()" ${!hasScript ? 'disabled title="Gere o roteiro primeiro"' : ''}>
           <i class="bi bi-stars"></i> Gerar Prompts Veo3
         </button>`;
+    }
+  }
+
+  async function runReprompt() {
+    const input = document.getElementById('repromptNums');
+    const btn   = document.getElementById('repromptBtn');
+    const result = document.getElementById('repromptResult');
+    const errEl  = document.getElementById('repromptError');
+    const area   = document.getElementById('repromptArea');
+
+    const raw = (input.value || '').trim();
+    if (!raw) { input.focus(); return; }
+
+    // Parse numbers from input (handles "3, 7, 12" or "3 7 12" or "3,7,12")
+    const numbers = raw.split(/[\s,;]+/).map(s => parseInt(s)).filter(n => !isNaN(n) && n > 0);
+    if (!numbers.length) {
+      errEl.textContent = 'Informe números válidos (ex: 3, 7, 12)';
+      errEl.style.display = '';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:.7rem;height:.7rem;border-width:2px"></span> Gerando…';
+    result.style.display = 'none';
+    errEl.style.display  = 'none';
+
+    try {
+      const res = await fetch(`/api/productions/${panelProdId}/tasks/prompts/reprompt`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ numbers })
+      }).then(r => r.json());
+
+      if (res.error) {
+        errEl.textContent = '⚠️ ' + res.error;
+        errEl.style.display = '';
+      } else {
+        area.value = res.result;
+        result.style.display = '';
+        showToast(`✅ ${numbers.length} prompt(s) regerado(s)!`, false);
+      }
+    } catch(e) {
+      errEl.textContent = '⚠️ Erro de conexão: ' + e.message;
+      errEl.style.display = '';
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-stars"></i> Regerar';
     }
   }
 
