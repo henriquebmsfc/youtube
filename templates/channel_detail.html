@@ -1087,6 +1087,27 @@
         <textarea id="promptsArea" class="panel-ta" style="min-height:400px">${esc(promptTask.result_text)}</textarea>`;
       body.innerHTML += `
         <div class="section-sep" style="margin-top:1rem"></div>
+
+        <!-- ── Detector de faltantes ── -->
+        <div style="margin-top:.75rem">
+          <div style="font-size:.75rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.5rem">
+            <i class="bi bi-folder2-open" style="color:var(--blue)"></i> Detectar vídeos faltando
+          </div>
+          <div style="font-size:.78rem;color:var(--muted);margin-bottom:.5rem">
+            Selecione a pasta com os vídeos baixados. O sistema lê os nomes dos arquivos,
+            detecta a sequência e aponta quais estão faltando.
+          </div>
+          <label style="display:flex;align-items:center;gap:.5rem;background:rgba(56,139,253,.08);border:1px dashed rgba(56,139,253,.35);border-radius:8px;padding:.55rem .85rem;cursor:pointer;font-size:.82rem;color:var(--blue)">
+            <i class="bi bi-folder2-open"></i> Selecionar pasta de vídeos
+            <input type="file" id="folderInput" webkitdirectory multiple accept="video/*,.mp4,.mov,.avi"
+                   style="display:none" onchange="detectMissing(this.files)">
+          </label>
+          <div id="missingResult" style="display:none;margin-top:.6rem"></div>
+        </div>
+
+        <div class="section-sep" style="margin-top:1rem"></div>
+
+        <!-- ── Regerar reprovados ── -->
         <div style="margin-top:.75rem">
           <div style="font-size:.75rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.5rem">
             <i class="bi bi-arrow-repeat" style="color:var(--yellow)"></i> Regerar prompts reprovados
@@ -1134,6 +1155,60 @@
           <i class="bi bi-stars"></i> Gerar Prompts Veo3
         </button>`;
     }
+  }
+
+  function detectMissing(files) {
+    const resultEl = document.getElementById('missingResult');
+    if (!files || !files.length) { resultEl.style.display = 'none'; return; }
+
+    // Extract leading numbers from filenames (e.g. "007_scene.mp4" → 7)
+    const nums = [];
+    for (const f of files) {
+      const m = f.name.match(/^(\d+)/);
+      if (m) nums.push(parseInt(m[1], 10));
+    }
+
+    if (!nums.length) {
+      resultEl.style.display = '';
+      resultEl.innerHTML = `<div style="font-size:.8rem;color:var(--red)">⚠️ Nenhum arquivo com número no início do nome foi encontrado.</div>`;
+      return;
+    }
+
+    nums.sort((a, b) => a - b);
+    const min = nums[0];
+    const max = nums[nums.length - 1];
+    const present = new Set(nums);
+    const missing = [];
+    for (let i = min; i <= max; i++) {
+      if (!present.has(i)) missing.push(i);
+    }
+
+    const missingStr = missing.join(', ');
+
+    // Auto-fill the reprompt input
+    const repromptInput = document.getElementById('repromptNums');
+    if (repromptInput && missing.length) repromptInput.value = missingStr;
+
+    if (!missing.length) {
+      resultEl.innerHTML = `
+        <div style="font-size:.8rem;padding:.5rem .7rem;border-radius:6px;background:rgba(63,185,80,.12);border:1px solid rgba(63,185,80,.3);color:#3fb950">
+          ✅ Sequência completa! ${files.length} arquivo(s), do ${min} ao ${max}, sem falhas.
+        </div>`;
+    } else {
+      resultEl.innerHTML = `
+        <div style="font-size:.8rem;padding:.5rem .7rem;border-radius:6px;background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.3)">
+          <div style="color:var(--text);margin-bottom:.3rem">
+            📂 <strong>${files.length}</strong> arquivo(s) encontrado(s) &nbsp;·&nbsp;
+            Sequência <strong>${min}</strong>–<strong>${max}</strong> &nbsp;·&nbsp;
+            <span style="color:var(--red)"><strong>${missing.length}</strong> faltando</span>
+          </div>
+          <div style="color:var(--red);font-family:monospace;font-size:.78rem;word-break:break-all">
+            ${missingStr}
+          </div>
+          ${missing.length ? `<div style="font-size:.74rem;color:var(--muted);margin-top:.35rem">↑ Números preenchidos automaticamente no campo de regerar</div>` : ''}
+        </div>`;
+    }
+    resultEl.style.display = '';
   }
 
   async function runReprompt() {
