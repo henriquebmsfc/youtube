@@ -321,6 +321,12 @@
       <i class="bi bi-trash3"></i>
       <span id="wipeText">Limpar BD</span>
     </button>
+    <button class="btn-sync" id="recalcBtn" onclick="recalcScores()"
+            style="background:var(--surface);border:1px solid var(--border);color:var(--muted)"
+            title="Recalcula as notas de todos os vídeos já salvos com a fórmula atual">
+      <i class="bi bi-calculator" id="recalcIcon"></i>
+      <span id="recalcText">Recalcular notas</span>
+    </button>
     <button class="btn-sync" id="syncBtn" onclick="syncNow()">
       <i class="bi bi-arrow-clockwise" id="syncIcon"></i>
       <span id="syncText">Sincronizar</span>
@@ -743,6 +749,31 @@
     } finally {
       btn.disabled = false;
       txt.textContent = 'Limpar BD';
+    }
+  }
+
+  async function recalcScores() {
+    const btn  = document.getElementById('recalcBtn');
+    const icon = document.getElementById('recalcIcon');
+    const text = document.getElementById('recalcText');
+    btn.disabled = true;
+    icon.classList.add('spinning');
+    text.textContent = 'Recalculando…';
+    try {
+      const res  = await fetch('/api/recalculate-scores', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        showToast('✅ ' + data.message, false);
+        await loadVideos();
+      } else {
+        showToast('❌ Erro ao recalcular', true);
+      }
+    } catch(e) {
+      showToast('❌ Erro de conexão', true);
+    } finally {
+      btn.disabled = false;
+      icon.classList.remove('spinning');
+      text.textContent = 'Recalcular notas';
     }
   }
 

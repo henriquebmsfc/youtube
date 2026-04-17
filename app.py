@@ -278,6 +278,29 @@ def api_refresh():
         return jsonify({"success": False, "message": str(e)}), 400
 
 
+@app.route("/api/recalculate-scores", methods=["POST"])
+def api_recalculate_scores():
+    """Recalculate opportunity/engagement scores for all videos already in the DB."""
+    videos = database.get_videos(limit=10_000)
+    updated = 0
+    conn = __import__("sqlite3").connect(database.DB_PATH)
+    for v in videos:
+        try:
+            eng, opp = fetcher._calculate_scores(
+                v["views"], v["likes"], v["comments"], v["published_at"]
+            )
+            conn.execute(
+                "UPDATE videos SET engagement_score=?, opportunity_score=? WHERE video_id=?",
+                (eng, opp, v["video_id"]),
+            )
+            updated += 1
+        except Exception:
+            pass
+    conn.commit()
+    conn.close()
+    return jsonify({"success": True, "updated": updated, "message": f"{updated} scores recalculados"})
+
+
 @app.route("/video/<video_id>")
 def video_detail(video_id):
     video = database.get_video(video_id)
