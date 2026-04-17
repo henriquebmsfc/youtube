@@ -29,11 +29,8 @@ def _calculate_scores(views: int, likes: int, comments: int, published_at: str):
     # Views score: log scale, 1 M views → 100 (more sensitive to the real range)
     views_score = min(math.log10(views + 1) / math.log10(1_000_000) * 100, 100)
 
-    # Engagement score: 3 % = 100 (low weight — just a tie-breaker)
-    eng_score = min(engagement / 3 * 100, 100)
-
     # Recency score: exponential decay, half-life = 2 days
-    # Differentiates well in the first few days then flattens (day 7 ≈ 11)
+    # day 0 → 100, day 2 → 50, day 4 → 25, day 7 → 11
     try:
         pub = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
         days_old = (datetime.now(timezone.utc) - pub).days
@@ -41,8 +38,8 @@ def _calculate_scores(views: int, likes: int, comments: int, published_at: str):
     except Exception:
         recency = 50.0
 
-    # Weights: views 65%, engagement 5%, recency 30%
-    opportunity = views_score * 0.65 + eng_score * 0.05 + recency * 0.30
+    # Weights: views 85%, recency 15% — engagement not factored in
+    opportunity = views_score * 0.85 + recency * 0.15
     return round(engagement, 4), round(opportunity, 1)
 
 
