@@ -114,8 +114,11 @@ _claude_jobs:    dict = {}   # job_id → {prod_id, task_type, status, error, st
 
 # ── Persistent media cache (thumbnails + audio) ───────────────────────────────
 MEDIA_DIR = os.path.join(config.DB_DIR, "media")
-os.makedirs(os.path.join(MEDIA_DIR, "thumbs"), exist_ok=True)
-os.makedirs(os.path.join(MEDIA_DIR, "audio"),  exist_ok=True)
+try:
+    os.makedirs(os.path.join(MEDIA_DIR, "thumbs"), exist_ok=True)
+    os.makedirs(os.path.join(MEDIA_DIR, "audio"),  exist_ok=True)
+except Exception as _media_init_err:
+    print(f"[Media] Warning: could not create media dirs: {_media_init_err}")
 
 
 def _media_thumb_path(prod_id: int, index: int) -> str:
@@ -1419,43 +1422,46 @@ def api_thumbnails_generate(prod_id):
 
     def _bg_thumbnails():
         import json as _j
+        import base64 as _b64
         job = _thumbnail_jobs[prod_id]
 
-        # ── Phase 1: Claude generates 4 DALL-E prompts ────────────────────────
-        # Try to load the source video thumbnail as visual reference for 2 of the 4 prompts
+        # ── Outer safety net: any unhandled exception → job marked error ──────
         try:
-            import anthropic as _anthropic
-            import base64 as _b64
-            _ac = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-
-            # Build user content — image block (if available) + text instruction
-            user_content = []
+            # BUG-FIX: initialize before inner try so except block can always read them
             has_ref_image = False
+            thumb_prompts = []
 
-            if source_thumbnail:
-                try:
-                    img_resp = http_requests.get(source_thumbnail, timeout=10)
-                    if img_resp.status_code == 200:
-                        ct = img_resp.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
-                        if ct not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
-                            ct = "image/jpeg"
-                        img_b64 = _b64.standard_b64encode(img_resp.content).decode("utf-8")
-                        user_content.append({
-                            "type": "image",
-                            "source": {"type": "base64", "media_type": ct, "data": img_b64},
-                        })
-                        has_ref_image = True
-                        print(f"[Thumbnails] Source thumbnail loaded ({len(img_resp.content)//1024}KB)")
-                except Exception as _te:
-                    print(f"[Thumbnails] Could not load source thumbnail: {_te}")
+            # ── Phase 1: Claude generates 4 DALL-E prompts ───────────────────
+            try:
+                import anthropic as _anthropic
+                _ac = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
-            if has_ref_image:
-                prompt_text = (
-                    f"You are a YouTube thumbnail design expert.\n"
-                    f"The image above is the thumbnail of the original English video.\n"
-                    f"I am producing an adapted version of this video titled: \"{title}\"\n"
-                    + (f"Script excerpt: {script_text[:400]}\n" if script_text else "")
-                    + """
+                user_content = []
+
+                if source_thumbnail:
+                    try:
+                        img_resp = http_requests.get(source_thumbnail, timeout=10)
+                        if img_resp.status_code == 200:
+                            ct = img_resp.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+                            if ct not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
+                                ct = "image/jpeg"
+                            img_b64 = _b64.standard_b64encode(img_resp.content).decode("utf-8")
+                            user_content.append({
+                                "type": "image",
+                                "source": {"type": "base64", "media_type": ct, "data": img_b64},
+                            })
+                            has_ref_image = True
+                            print(f"[Thumbnails] Source thumbnail loaded ({len(img_resp.content)//1024}KB)")
+                    except Exception as _te:
+                        print(f"[Thumbnails] Could not load source thumbnail: {_te}")
+
+                if has_ref_image:
+                    prompt_text = (
+                        f"You are a YouTube thumbnail design expert.\n"
+                        f"The image above is the thumbnail of the original English video.\n"
+                        f"I am producing an adapted version of this video titled: \"{title}\"\n"
+                        + (f"Script excerpt: {script_text[:400]}\n" if script_text else "")
+                        + """
 Generate 4 DALL-E 3 image prompts for YouTube thumbnails engineered for MAXIMUM CLICK-THROUGH RATE (CTR).
 
 PROMPTS 1 & 2 — INSPIRED BY SOURCE THUMBNAIL:
@@ -1476,14 +1482,13 @@ TECHNICAL: 8K hyperdetailed, shallow depth of field (subject tack-sharp, backgro
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Return ONLY a JSON array of 4 strings (prompts 1–4). No markdown, no extra text."""
-                )
-            else:
-                # No reference image — 4 original prompts
-                prompt_text = (
-                    f"Create 4 DALL-E 3 image prompts for a YouTube thumbnail engineered for MAXIMUM CTR.\n"
-                    f"Video title: \"{title}\"\n"
-                    + (f"Script excerpt: {script_text[:600]}\n" if script_text else "")
-                    + """
+                    )
+                else:
+                    prompt_text = (
+                        f"Create 4 DALL-E 3 image prompts for a YouTube thumbnail engineered for MAXIMUM CTR.\n"
+                        f"Video title: \"{title}\"\n"
+                        + (f"Script excerpt: {script_text[:600]}\n" if script_text else "")
+                        + """
 Each of the 4 prompts must describe a COMPLETELY DIFFERENT visual concept (e.g. dramatic human portrait, epic landscape/architecture, powerful artifact close-up, tense action moment).
 
 ━━━ HIGH-CTR RULES (mandatory for ALL 4 prompts) ━━━
@@ -1493,85 +1498,98 @@ CONTRAST: Maximum tonal contrast — dramatically dark background against a bril
 COLOR: Hyper-saturated bold palette. Dominant warm tones (molten amber, deep crimson, rich gold) plus one cool accent (cobalt blue, royal purple). Colors that POP against YouTube's light-grey UI.
 LIGHTING: Hard cinematic lighting — blazing rim light, golden-hour warmth, torch/fire glow, or dramatic god-rays. Absolutely no flat or even lighting.
 EMOTION & SCALE: Evoke instant emotion — epic grandeur, imminent danger, forbidden discovery, or breathtaking spectacle. Viewer must feel something in under one second.
-TECHNICAL: Photorealistic, 8 K hyperdetailed, shallow depth of field (subject tack-sharp, background artistically blurred), 16:9 widescreen 1792×1024. STRICTLY NO text, letters, numbers, words, watermarks, logos or any writing anywhere in the image.
+TECHNICAL: Photorealistic, 8K hyperdetailed, shallow depth of field (subject tack-sharp, background artistically blurred), 16:9 widescreen 1792×1024. STRICTLY NO text, letters, numbers, words, watermarks, logos or any writing anywhere in the image.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Return ONLY a JSON array of 4 strings. No markdown, no extra text."""
-                )
+                    )
 
-            user_content.append({"type": "text", "text": prompt_text})
+                user_content.append({"type": "text", "text": prompt_text})
 
-            with _ac.messages.stream(
-                model=CLAUDE_MODEL, max_tokens=1500,
-                messages=[{"role": "user", "content": user_content}],
-            ) as stream:
-                raw = stream.get_final_text().strip()
-            raw = re.sub(r"^```(?:json)?\s*", "", raw)
-            raw = re.sub(r"\s*```$", "", raw).strip()
-            thumb_prompts = _j.loads(raw)
-            if not isinstance(thumb_prompts, list) or len(thumb_prompts) == 0:
-                raise ValueError("Expected non-empty list")
-            thumb_prompts = [str(p) for p in thumb_prompts[:4]]
-            print(f"[Thumbnails] {len(thumb_prompts)} prompts generated (ref_image={has_ref_image})")
-        except Exception as _pe:
-            print(f"[Thumbnails] Claude prompt error: {_pe} — using fallback prompts")
-            thumb_prompts = [
-                "Extreme close-up RAW photograph of a real medieval knight's weathered face, fierce determined eyes, dramatic hard rim light casting deep shadows, visible skin pores and battle scars, natural skin texture NOT plastic NOT wax, molten amber and crimson tones, hyper-saturated, shot on Canon EOS R5 85mm f/1.4, shallow depth of field, 16:9 widescreen, no text no letters no watermarks",
-                "Epic RAW photograph of a medieval army charging at golden hour, silhouetted real warriors backlit by a blazing orange sun, god-rays piercing dust clouds, maximum contrast dark foreground vs incandescent sky, natural film grain, photorealistic 8K, 16:9, no text no letters no watermarks",
-                "Towering gothic castle on a cliff at night, ring of torches below and full moon above, deep cobalt sky vs warm amber firelight, lone real human figure at the gate, rough stone texture visible, hyperdetailed RAW photograph, 16:9, no text no letters no watermarks",
-                "Close-up RAW photograph of an ancient crown on a stone altar, single shaft of golden light from above, deep black background, real metal texture with age patina, jewel tones hyper-saturated, film grain, shallow depth of field, 8K, 16:9, no text no letters no watermarks",
-            ]
-        job["prompts"]   = thumb_prompts
-        job["phase"]     = "images"
-        job["total"]     = len(thumb_prompts)
-        job["used_ref"]  = has_ref_image   # True if source thumbnail was used
+                with _ac.messages.stream(
+                    model=CLAUDE_MODEL, max_tokens=1500,
+                    messages=[{"role": "user", "content": user_content}],
+                ) as stream:
+                    raw = stream.get_final_text().strip()
+                raw = re.sub(r"^```(?:json)?\s*", "", raw)
+                raw = re.sub(r"\s*```$", "", raw).strip()
+                thumb_prompts = _j.loads(raw)
+                if not isinstance(thumb_prompts, list) or len(thumb_prompts) == 0:
+                    raise ValueError("Expected non-empty list")
+                thumb_prompts = [str(p) for p in thumb_prompts[:4]]
+                print(f"[Thumbnails] {len(thumb_prompts)} prompts generated (ref_image={has_ref_image})")
+            except Exception as _pe:
+                print(f"[Thumbnails] Claude prompt error: {_pe} — using fallback prompts")
+                thumb_prompts = [
+                    "Extreme close-up RAW photograph of a real medieval knight's weathered face, fierce determined eyes, dramatic hard rim light casting deep shadows, visible skin pores and battle scars, natural skin texture NOT plastic NOT wax, molten amber and crimson tones, hyper-saturated, shot on Canon EOS R5 85mm f/1.4, shallow depth of field, 16:9 widescreen, no text no letters no watermarks",
+                    "Epic RAW photograph of a medieval army charging at golden hour, silhouetted real warriors backlit by a blazing orange sun, god-rays piercing dust clouds, maximum contrast dark foreground vs incandescent sky, natural film grain, photorealistic 8K, 16:9, no text no letters no watermarks",
+                    "Towering gothic castle on a cliff at night, ring of torches below and full moon above, deep cobalt sky vs warm amber firelight, lone real human figure at the gate, rough stone texture visible, hyperdetailed RAW photograph, 16:9, no text no letters no watermarks",
+                    "Close-up RAW photograph of an ancient crown on a stone altar, single shaft of golden light from above, deep black background, real metal texture with age patina, jewel tones hyper-saturated, film grain, shallow depth of field, 8K, 16:9, no text no letters no watermarks",
+                ]
 
-        # ── Phase 2: DALL-E 3 generates each image ────────────────────────────
-        from openai import OpenAI as _OAI
-        oai = _OAI(api_key=config.OPENAI_API_KEY)
-        urls = []
-        for i, p in enumerate(thumb_prompts):
-            try:
-                resp = oai.images.generate(
-                    model="dall-e-3",
-                    prompt=p,
-                    size="1792x1024",
-                    quality="hd",
-                    n=1,
-                )
-                ext_url = resp.data[0].url
-                # Download and cache locally so the image persists beyond the ~1h OpenAI URL expiry
-                local_path = _media_thumb_path(prod_id, i)
+            job["prompts"]  = thumb_prompts
+            job["phase"]    = "images"
+            job["total"]    = len(thumb_prompts)
+            job["used_ref"] = has_ref_image
+
+            # ── Phase 2: DALL-E 3 generates each image ────────────────────────
+            from openai import OpenAI as _OAI
+            oai = _OAI(api_key=config.OPENAI_API_KEY)
+            urls = []
+            for i, p in enumerate(thumb_prompts):
                 try:
-                    img_bytes = http_requests.get(ext_url, timeout=60).content
-                    with open(local_path, "wb") as _f:
-                        _f.write(img_bytes)
-                    serve_url = f"/api/media/thumbs/{prod_id}_{i}.png"
-                    print(f"[DALL-E] {i+1}/{len(thumb_prompts)} cached locally prod={prod_id}")
-                except Exception as _dl_err:
-                    print(f"[DALL-E] cache error for image {i+1}: {_dl_err} — using external URL")
-                    serve_url = ext_url
-                urls.append(serve_url)
-                job["done"] = i + 1
-            except Exception as _ie:
-                print(f"[DALL-E] image {i+1} error: {_ie}")
-                urls.append(None)
-                job["done"] = i + 1
+                    resp = oai.images.generate(
+                        model="dall-e-3",
+                        prompt=p,
+                        size="1792x1024",
+                        quality="hd",
+                        n=1,
+                    )
+                    ext_url = resp.data[0].url
+                    # BUG-FIX: try local file, fall back to base64 data URI (never store expiring URL)
+                    serve_url = None
+                    try:
+                        img_bytes = http_requests.get(ext_url, timeout=60).content
+                        local_path = _media_thumb_path(prod_id, i)
+                        try:
+                            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                            with open(local_path, "wb") as _f:
+                                _f.write(img_bytes)
+                            serve_url = f"/api/media/thumbs/{prod_id}_{i}.png"
+                            print(f"[DALL-E] {i+1}/{len(thumb_prompts)} cached locally prod={prod_id}")
+                        except Exception as _fs_err:
+                            # Filesystem unavailable — embed as base64 (works without any file system)
+                            serve_url = "data:image/png;base64," + _b64.b64encode(img_bytes).decode()
+                            print(f"[DALL-E] {i+1} stored as base64 (fs error: {_fs_err})")
+                    except Exception as _dl_err:
+                        print(f"[DALL-E] download error image {i+1}: {_dl_err}")
+                    urls.append(serve_url)
+                    job["done"] = i + 1
+                except Exception as _ie:
+                    print(f"[DALL-E] generation error image {i+1}: {_ie}")
+                    urls.append(None)
+                    job["done"] = i + 1
 
-        real_urls = [u for u in urls if u]
-        if real_urls:
-            job.update(status="done", urls=real_urls)
-            database.upsert_task(prod_id, "thumbnails", "done",
-                                 result_text=_j.dumps({
-                                     "urls":     real_urls,
-                                     "prompts":  thumb_prompts,
-                                     "used_ref": has_ref_image,
-                                 }))
-        else:
-            job.update(status="error",
-                       error="Nenhuma imagem gerada — verifique créditos OpenAI / DALL-E 3")
-            # Use set_task_status so previous thumbnail URLs in result_text are preserved
-            database.set_task_status(prod_id, "thumbnails", "pending", notes=job["error"])
+            real_urls = [u for u in urls if u]
+            if real_urls:
+                job.update(status="done", urls=real_urls)
+                database.upsert_task(prod_id, "thumbnails", "done",
+                                     result_text=_j.dumps({
+                                         "urls":     real_urls,
+                                         "prompts":  thumb_prompts,
+                                         "used_ref": has_ref_image,
+                                     }))
+            else:
+                err_msg = "Nenhuma imagem gerada — verifique créditos OpenAI / DALL-E 3"
+                job.update(status="error", error=err_msg)
+                database.set_task_status(prod_id, "thumbnails", "pending", notes=err_msg)
+
+        except Exception as _fatal:
+            # BUG-FIX: outer catch — previously any exception here left job stuck as "processing" forever
+            err_msg = f"Erro interno na geração: {_fatal}"
+            print(f"[Thumbnails] Fatal error prod={prod_id}: {_fatal}")
+            _thumbnail_jobs.get(prod_id, {}).update(status="error", error=err_msg)
+            database.set_task_status(prod_id, "thumbnails", "pending", notes=err_msg)
 
     threading.Thread(target=_bg_thumbnails, daemon=True).start()
     return jsonify({"queued": True})
