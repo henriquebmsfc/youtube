@@ -1591,11 +1591,16 @@ Return ONLY a JSON array of 4 strings. No markdown, no extra text."""
                 database.set_task_status(prod_id, "thumbnails", "pending", notes=err_msg)
 
         except Exception as _fatal:
-            # BUG-FIX: outer catch — previously any exception here left job stuck as "processing" forever
-            err_msg = f"Erro interno na geração: {_fatal}"
-            print(f"[Thumbnails] Fatal error prod={prod_id}: {_fatal}")
-            _thumbnail_jobs.get(prod_id, {}).update(status="error", error=err_msg)
-            database.set_task_status(prod_id, "thumbnails", "pending", notes=err_msg)
+            import traceback as _tb
+            full_tb = _tb.format_exc()
+            err_msg = f"{type(_fatal).__name__}: {_fatal}"
+            print(f"[Thumbnails] Fatal error prod={prod_id}:\n{full_tb}")
+            # Use job["key"] = value directly — safer than .get(id,{}).update() which
+            # silently modifies a throwaway dict if prod_id was removed from the dict
+            job["status"] = "error"
+            job["error"]  = err_msg
+            database.set_task_status(prod_id, "thumbnails", "pending",
+                                     notes=err_msg[:500])
 
     threading.Thread(target=_bg_thumbnails, daemon=True).start()
     return jsonify({"queued": True})
@@ -1610,7 +1615,13 @@ def api_thumbnails_status(prod_id):
         prod = database.get_production(prod_id)
         if prod:
             task = (prod.get("tasks") or {}).get("thumbnails", {})
-            return jsonify({"status": task.get("status", "pending"), "done": 0, "total": 4})
+            notes = task.get("notes", "")
+            return jsonify({
+                "status": task.get("status", "pending"),
+                "done": 0, "total": 4,
+                # surface DB notes as error so UI can display them
+                "error": notes or None,
+            })
         return jsonify({"status": "unknown"}), 404
     total = job.get("total") or 4
     done  = job.get("done", 0)
