@@ -1533,9 +1533,13 @@ Return ONLY a JSON array of 4 strings. No markdown, no extra text."""
             job["used_ref"] = has_ref_image
 
             # ── Phase 2: DALL-E 3 generates each image ────────────────────────
+            if not config.OPENAI_API_KEY:
+                raise ValueError("OPENAI_API_KEY não configurada nas variáveis de ambiente do Railway")
+
             from openai import OpenAI as _OAI
             oai = _OAI(api_key=config.OPENAI_API_KEY)
             urls = []
+            last_error = ""
             for i, p in enumerate(thumb_prompts):
                 try:
                     resp = oai.images.generate(
@@ -1546,7 +1550,7 @@ Return ONLY a JSON array of 4 strings. No markdown, no extra text."""
                         n=1,
                     )
                     ext_url = resp.data[0].url
-                    # BUG-FIX: try local file, fall back to base64 data URI (never store expiring URL)
+                    # Try local file first, fall back to base64 data URI (never store expiring URL)
                     serve_url = None
                     try:
                         img_bytes = http_requests.get(ext_url, timeout=60).content
@@ -1558,7 +1562,6 @@ Return ONLY a JSON array of 4 strings. No markdown, no extra text."""
                             serve_url = f"/api/media/thumbs/{prod_id}_{i}.png"
                             print(f"[DALL-E] {i+1}/{len(thumb_prompts)} cached locally prod={prod_id}")
                         except Exception as _fs_err:
-                            # Filesystem unavailable — embed as base64 (works without any file system)
                             serve_url = "data:image/png;base64," + _b64.b64encode(img_bytes).decode()
                             print(f"[DALL-E] {i+1} stored as base64 (fs error: {_fs_err})")
                     except Exception as _dl_err:
@@ -1566,6 +1569,7 @@ Return ONLY a JSON array of 4 strings. No markdown, no extra text."""
                     urls.append(serve_url)
                     job["done"] = i + 1
                 except Exception as _ie:
+                    last_error = str(_ie)
                     print(f"[DALL-E] generation error image {i+1}: {_ie}")
                     urls.append(None)
                     job["done"] = i + 1
@@ -1580,7 +1584,9 @@ Return ONLY a JSON array of 4 strings. No markdown, no extra text."""
                                          "used_ref": has_ref_image,
                                      }))
             else:
-                err_msg = "Nenhuma imagem gerada — verifique créditos OpenAI / DALL-E 3"
+                # Surface the actual OpenAI error so the user knows what's wrong
+                err_msg = f"Nenhuma imagem gerada. Erro DALL-E: {last_error}" if last_error \
+                          else "Nenhuma imagem gerada — verifique créditos OpenAI / DALL-E 3"
                 job.update(status="error", error=err_msg)
                 database.set_task_status(prod_id, "thumbnails", "pending", notes=err_msg)
 
