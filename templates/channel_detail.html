@@ -1048,18 +1048,37 @@
 
     // ── Generating in background ──
     if (promptTask.status === 'in_progress') {
-      body.innerHTML = _bgSpinner('var(--purple)', 'stars', 'DOTTI Agent gerando prompts Veo3…', 'Analisando personagens e sincronizando cenas<br>Isso pode levar 30–90 segundos');
+      body.innerHTML = `
+        <div style="text-align:center;padding:2.5rem 1rem">
+          <div style="font-size:2rem;margin-bottom:.75rem"><span class="spinning" style="display:inline-block">⟳</span></div>
+          <div style="font-weight:700;font-size:1rem;color:var(--purple);margin-bottom:.4rem">DOTTI Agent gerando prompts Veo3…</div>
+          <div style="font-size:.82rem;color:var(--muted);margin-bottom:.75rem">
+            Phase 0: extraindo âncora histórica → gerando prompts sincronizados<br>
+            Vídeos longos podem levar <strong style="color:var(--text)">2–4 minutos</strong>
+          </div>
+          <div id="promptsElapsed" style="font-size:.78rem;color:var(--muted);font-family:monospace">⏱ 0s</div>
+        </div>`;
       foot.innerHTML = `
         <button class="btn-outline" onclick="closePanel()"><i class="bi bi-x"></i> Fechar painel</button>
         <button class="btn-danger" onclick="resetTask('prompts')" title="${promptTask.result_text ? 'Cancelar geração e restaurar prompts anteriores' : 'Cancelar geração'}">
           <i class="bi bi-stop-circle"></i> ${promptTask.result_text ? 'Cancelar e restaurar' : 'Cancelar'}
         </button>`;
+      // Elapsed timer
+      const _promptsStart = Date.now();
+      const _promptsTimer = setInterval(() => {
+        const el = document.getElementById('promptsElapsed');
+        if (!el) { clearInterval(_promptsTimer); return; }
+        const s = Math.round((Date.now() - _promptsStart) / 1000);
+        el.textContent = `⏱ ${s}s`;
+      }, 1000);
       _startPoll(prod.id, 'prompts',
         (updatedProd) => {
+          clearInterval(_promptsTimer);
           showToast('✅ Prompts Veo3 prontos!', false);
           renderPromptsPanel(updatedProd);
         },
         (msg) => {
+          clearInterval(_promptsTimer);
           document.getElementById('panelBody').innerHTML = _errHtml(msg);
           document.getElementById('panelFooter').innerHTML =
             `<button class="btn-accent" id="genPromptsBtn" onclick="generatePrompts()">

@@ -1517,9 +1517,12 @@ def _bg_prompts(job_id, prod_id, user_msg, script_text: str = "", instrucoes_vis
         import anthropic as _anthropic
         client = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
         t_dotti = _time.time()
+        # Cap DOTTI at 16 000 output tokens (~80 prompts × 200 tokens each)
+        # to avoid 4-6 min waits on very long scripts
+        dotti_max_tokens = min(16_000, _model_max_tokens(CLAUDE_MODEL))
         with client.messages.stream(
             model=CLAUDE_MODEL,
-            max_tokens=_model_max_tokens(CLAUDE_MODEL),
+            max_tokens=dotti_max_tokens,
             system=DOTTI_SYSTEM,
             messages=[{"role": "user", "content": final_user_msg}],
         ) as stream:
