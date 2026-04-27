@@ -106,7 +106,7 @@ GENAIPRO_BASE = "https://genaipro.vn/api/v1"
 _LANG_MAP = {
     "pt": "portuguese", "en": "english", "es": "spanish",
     "de": "german", "fr": "french", "it": "italian",
-    "ro": "romanian", "pl": "polish", "hr": "croatian",
+    "ro": "romanian", "pl": "polish", "hr": "croatian", "hu": "hungarian",
 }
 
 _thumbnail_jobs: dict = {}   # job_id → {status, urls, error, prompt}
@@ -595,6 +595,7 @@ def api_translate_title_options():
         "ro": ("Romanian",   "Romania",         "Romania"),
         "pl": ("Polish",     "Poland",          "Poland"),
         "hr": ("Croatian",   "Croatia",         "Croatia"),
+        "hu": ("Hungarian",  "Hungary",         "Hungary"),
     }
     lang_name, country_name, country_ex = _LANG_INFO.get(target_lang, ("Portuguese", "Brazil", "Brazil"))
 
@@ -734,7 +735,7 @@ def api_script_generate(prod_id):
     _lang_names = {
         "pt": "Portuguese", "en": "English", "es": "Spanish",
         "de": "German",     "fr": "French",  "it": "Italian",
-        "ro": "Romanian",   "pl": "Polish",  "hr": "Croatian",
+        "ro": "Romanian",   "pl": "Polish",  "hr": "Croatian",  "hu": "Hungarian",
     }
     target_lang = _lang_names.get(lang_code, lang_code)
 
