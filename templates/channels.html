@@ -215,62 +215,92 @@
     renderChannels();
   }
 
+  function channelCardHtml(ch) {
+    const ownerClass = ch.owner ? `owner-${ch.owner.toLowerCase()}` : '';
+    const ownerColor = OWNER_COLOR[ch.owner] || 'var(--muted)';
+    const ownerOpts  = OWNERS.map(o =>
+      `<option value="${o}" ${o === ch.owner ? 'selected' : ''}>${o || '— sem dono —'}</option>`
+    ).join('');
+    return `
+    <div class="col-sm-6 col-lg-4">
+      <div class="channel-card ${ownerClass}">
+        <div style="display:flex;align-items:flex-start;gap:.875rem">
+          <div class="channel-flag">${FLAG_MAP[ch.language_code] || ch.flag || '🌐'}</div>
+          <div style="flex:1;min-width:0">
+            <div class="channel-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(ch.name)}</div>
+            <div class="channel-lang">${LANG_NAME[ch.language_code] || ch.language_code}</div>
+          </div>
+          <button class="btn-danger" onclick="deleteChannel(${ch.id},'${esc(ch.name)}')" title="Apagar canal" style="flex-shrink:0;padding:.25rem .5rem">
+            <i class="bi bi-trash3"></i>
+          </button>
+        </div>
+        ${ch.description ? `<div style="font-size:.8rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(ch.description)}</div>` : ''}
+        <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+          <span class="stat-pill"><i class="bi bi-camera-video"></i> ${ch.production_count || 0} vídeos</span>
+          ${ch.pending_tasks > 0 ? `<span class="stat-pill warn"><i class="bi bi-clock"></i> ${ch.pending_tasks} pendentes</span>` : ''}
+          <select class="owner-select ${ch.owner ? 'has-owner' : ''}"
+                  style="margin-left:auto;${ch.owner ? `color:${ownerColor};border-color:${ownerColor}` : ''}"
+                  onchange="setOwner(${ch.id}, this)">
+            ${ownerOpts}
+          </select>
+        </div>
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:auto">
+          <a href="/channel/${ch.id}" class="btn-accent" style="flex:1;justify-content:center">
+            <i class="bi bi-folder2-open"></i> Abrir
+          </a>
+          <button class="btn-outline" onclick="openAddUrl(${ch.id})" style="flex:1;justify-content:center">
+            <i class="bi bi-link-45deg"></i> + URL
+          </button>
+        </div>
+      </div>
+    </div>`;
+  }
+
   function renderChannels() {
     const grid = document.getElementById('channelGrid');
     document.getElementById('channelCount').textContent = channels.length
       ? `${channels.length} canal(is)` : '';
 
     if (!channels.length) {
-      grid.innerHTML = `<div class="col-12 empty-state" id="emptyMsg"><div class="ei">📺</div>
+      grid.innerHTML = `<div class="col-12 empty-state"><div class="ei">📺</div>
         <div>Nenhum canal criado ainda</div>
         <div style="margin-top:.5rem;font-size:.85rem">Clique em <strong>Novo Canal</strong> para começar</div></div>`;
       return;
     }
 
-    grid.innerHTML = channels.map(ch => {
-      const ownerClass = ch.owner ? `owner-${ch.owner.toLowerCase()}` : '';
-      const ownerColor = OWNER_COLOR[ch.owner] || 'var(--muted)';
-      const ownerOpts  = OWNERS.map(o =>
-        `<option value="${o}" ${o === ch.owner ? 'selected' : ''}>${o || '— sem dono —'}</option>`
-      ).join('');
-      return `
-      <div class="col-sm-6 col-lg-4">
-        <div class="channel-card ${ownerClass}">
-          <!-- Header: flag + name + delete -->
-          <div style="display:flex;align-items:flex-start;gap:.875rem">
-            <div class="channel-flag">${FLAG_MAP[ch.language_code] || ch.flag || '🌐'}</div>
-            <div style="flex:1;min-width:0">
-              <div class="channel-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(ch.name)}</div>
-              <div class="channel-lang">${LANG_NAME[ch.language_code] || ch.language_code}</div>
-            </div>
-            <button class="btn-danger" onclick="deleteChannel(${ch.id},'${esc(ch.name)}')" title="Apagar canal" style="flex-shrink:0;padding:.25rem .5rem">
-              <i class="bi bi-trash3"></i>
-            </button>
-          </div>
-          <!-- Description -->
-          ${ch.description ? `<div style="font-size:.8rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(ch.description)}</div>` : ''}
-          <!-- Stats + Owner -->
-          <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
-            <span class="stat-pill"><i class="bi bi-camera-video"></i> ${ch.production_count || 0} vídeos</span>
-            ${ch.pending_tasks > 0 ? `<span class="stat-pill warn"><i class="bi bi-clock"></i> ${ch.pending_tasks} pendentes</span>` : ''}
-            <select class="owner-select ${ch.owner ? 'has-owner' : ''}"
-                    style="margin-left:auto;${ch.owner ? `color:${ownerColor};border-color:${ownerColor}` : ''}"
-                    onchange="setOwner(${ch.id}, this)">
-              ${ownerOpts}
-            </select>
-          </div>
-          <!-- Actions -->
-          <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:auto">
-            <a href="/channel/${ch.id}" class="btn-accent" style="flex:1;justify-content:center">
-              <i class="bi bi-folder2-open"></i> Abrir
-            </a>
-            <button class="btn-outline" onclick="openAddUrl(${ch.id})" style="flex:1;justify-content:center">
-              <i class="bi bi-link-45deg"></i> + URL
-            </button>
+    // Group by owner — defined order: named owners first, then unassigned
+    const ORDER = ['Henrique', 'Igor', 'Gabriel', ''];
+    const groups = {};
+    ORDER.forEach(o => groups[o] = []);
+    channels.forEach(ch => {
+      const key = ORDER.includes(ch.owner) ? ch.owner : '';
+      groups[key].push(ch);
+    });
+
+    let html = '';
+    ORDER.forEach(owner => {
+      const list = groups[owner];
+      if (!list.length) return;
+
+      const color  = OWNER_COLOR[owner] || 'var(--muted)';
+      const label  = owner || 'Sem responsável';
+      const total  = list.reduce((s, c) => s + (c.production_count || 0), 0);
+
+      html += `
+        <div class="col-12" style="margin-top:${html ? '1.5rem' : '0'};margin-bottom:.5rem">
+          <div style="display:flex;align-items:center;gap:.75rem">
+            <div style="width:4px;height:1.4rem;border-radius:4px;background:${color};flex-shrink:0"></div>
+            <span style="font-weight:700;font-size:.95rem;color:${owner ? color : 'var(--muted)'}">
+              ${owner ? `<i class="bi bi-person-fill"></i> ` : '<i class="bi bi-person-dash"></i> '}${label}
+            </span>
+            <span style="font-size:.75rem;color:var(--muted)">${list.length} canal(is) · ${total} vídeo(s)</span>
+            <div style="flex:1;height:1px;background:var(--border)"></div>
           </div>
         </div>
-      </div>`;
-    }).join('');
+        ${list.map(channelCardHtml).join('')}`;
+    });
+
+    grid.innerHTML = html;
   }
 
   // ── Create channel ────────────────────────────────────────────────────────
