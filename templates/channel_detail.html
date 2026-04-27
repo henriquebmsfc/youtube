@@ -171,6 +171,9 @@
   </div>
   <div style="display:flex;gap:.5rem;align-items:center">
     <span id="prodCount" style="font-size:.82rem;color:var(--muted)"></span>
+    <button class="btn-outline" onclick="openChannelProfile()">
+      <i class="bi bi-gear"></i> Perfil do Canal
+    </button>
     <button class="btn-accent" onclick="openAddUrl()">
       <i class="bi bi-link-45deg"></i> Adicionar por URL
     </button>
@@ -1738,6 +1741,202 @@
   }
 
   loadProductions();
+
+  // ── Channel Profile Modal ──────────────────────────────────────────────────
+  const CHANNEL_ID = {{ channel.id }};
+
+  function openChannelProfile() {
+    // Pre-fill form with current channel data from server
+    fetch(`/api/channels/${CHANNEL_ID}`)
+      .then(r => r.json())
+      .then(ch => {
+        document.getElementById('cpName').value             = ch.name || '';
+        document.getElementById('cpDescription').value     = ch.description || '';
+        document.getElementById('cpTemaPrincipal').value   = ch.tema_principal || '';
+        document.getElementById('cpSubtema').value         = ch.subtema || '';
+        document.getElementById('cpTipoCanal').value       = ch.tipo_canal || '';
+        document.getElementById('cpInstrucoesRoteiro').value = ch.instrucoes_roteiro || '';
+        document.getElementById('cpInstrucoesVisuais').value = ch.instrucoes_visuais || '';
+        document.getElementById('cpPreviewBox').style.display = 'none';
+        document.getElementById('cpSaveBtn').disabled = false;
+        new bootstrap.Modal(document.getElementById('modalChannelProfile')).show();
+      })
+      .catch(() => {
+        // Fallback: use Jinja-rendered values
+        document.getElementById('cpName').value             = {{ channel.name | tojson }};
+        document.getElementById('cpDescription').value     = {{ (channel.description or '') | tojson }};
+        document.getElementById('cpTemaPrincipal').value   = {{ (channel.tema_principal or '') | tojson }};
+        document.getElementById('cpSubtema').value         = {{ (channel.subtema or '') | tojson }};
+        document.getElementById('cpTipoCanal').value       = {{ (channel.tipo_canal or '') | tojson }};
+        document.getElementById('cpInstrucoesRoteiro').value = {{ (channel.instrucoes_roteiro or '') | tojson }};
+        document.getElementById('cpInstrucoesVisuais').value = {{ (channel.instrucoes_visuais or '') | tojson }};
+        document.getElementById('cpPreviewBox').style.display = 'none';
+        document.getElementById('cpSaveBtn').disabled = false;
+        new bootstrap.Modal(document.getElementById('modalChannelProfile')).show();
+      });
+  }
+
+  async function generateChannelProfile() {
+    const btn = document.getElementById('cpGenerateBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinning">⟳</span> Gerando…';
+    document.getElementById('cpPreviewBox').style.display = 'none';
+    try {
+      const res = await fetch(`/api/channels/${CHANNEL_ID}/generate-profile`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Erro desconhecido');
+      const p = data.profile;
+      // Populate preview fields (editable)
+      document.getElementById('cpPreviewTemaPrincipal').value   = p.tema_principal || '';
+      document.getElementById('cpPreviewSubtema').value         = p.subtema || '';
+      document.getElementById('cpPreviewTipoCanal').value       = p.tipo_canal || '';
+      document.getElementById('cpPreviewInstrucoesRoteiro').value = p.instrucoes_roteiro || '';
+      document.getElementById('cpPreviewInstrucoesVisuais').value = p.instrucoes_visuais || '';
+      document.getElementById('cpPreviewBox').style.display = 'flex';
+    } catch(e) {
+      showToast('❌ ' + e.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-stars"></i> Gerar perfil com IA';
+    }
+  }
+
+  function applyAiPreview() {
+    document.getElementById('cpTemaPrincipal').value   = document.getElementById('cpPreviewTemaPrincipal').value;
+    document.getElementById('cpSubtema').value         = document.getElementById('cpPreviewSubtema').value;
+    document.getElementById('cpTipoCanal').value       = document.getElementById('cpPreviewTipoCanal').value;
+    document.getElementById('cpInstrucoesRoteiro').value = document.getElementById('cpPreviewInstrucoesRoteiro').value;
+    document.getElementById('cpInstrucoesVisuais').value = document.getElementById('cpPreviewInstrucoesVisuais').value;
+    document.getElementById('cpPreviewBox').style.display = 'none';
+    showToast('✅ Sugestão aplicada — revise e salve', false);
+  }
+
+  async function saveChannelProfile() {
+    const btn = document.getElementById('cpSaveBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinning">⟳</span> Salvando…';
+    try {
+      const payload = {
+        name:                document.getElementById('cpName').value.trim(),
+        description:         document.getElementById('cpDescription').value.trim(),
+        tema_principal:      document.getElementById('cpTemaPrincipal').value.trim(),
+        subtema:             document.getElementById('cpSubtema').value.trim(),
+        tipo_canal:          document.getElementById('cpTipoCanal').value.trim(),
+        instrucoes_roteiro:  document.getElementById('cpInstrucoesRoteiro').value.trim(),
+        instrucoes_visuais:  document.getElementById('cpInstrucoesVisuais').value.trim(),
+      };
+      const res = await fetch(`/api/channels/${CHANNEL_ID}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Erro ao salvar');
+      // Update hero display
+      document.querySelector('.hero-name').textContent = data.name || '';
+      document.querySelector('.hero-meta').textContent = data.description || '';
+      bootstrap.Modal.getInstance(document.getElementById('modalChannelProfile')).hide();
+      showToast('✅ Perfil do canal salvo!', false);
+    } catch(e) {
+      showToast('❌ ' + e.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-check-lg"></i> Salvar';
+    }
+  }
 </script>
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<!--  Modal — Channel Profile                                                   -->
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div class="modal fade" id="modalChannelProfile" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content" style="background:var(--surface);color:var(--text);border:1px solid var(--border)">
+      <div class="modal-header" style="border-bottom:1px solid var(--border)">
+        <h5 class="modal-title"><i class="bi bi-gear"></i> Perfil do Canal</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:1rem">
+
+        <!-- Basic info -->
+        <div style="font-size:.78rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Informações Básicas</div>
+        <div class="form-row">
+          <label>Nome do canal</label>
+          <input id="cpName" class="form-dark" type="text" placeholder="Ex: Reconstrução com IA">
+        </div>
+        <div class="form-row">
+          <label>Descrição geral</label>
+          <input id="cpDescription" class="form-dark" type="text" placeholder="Briefing geral do canal">
+        </div>
+
+        <div style="border-top:1px solid var(--border);margin:.25rem 0"></div>
+
+        <!-- AI generate button -->
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
+          <div style="font-size:.78rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Perfil de Nicho</div>
+          <button id="cpGenerateBtn" class="btn-green" onclick="generateChannelProfile()" style="font-size:.8rem;padding:.4rem .9rem">
+            <i class="bi bi-stars"></i> Gerar perfil com IA
+          </button>
+        </div>
+
+        <div class="form-row">
+          <label>Tema principal</label>
+          <input id="cpTemaPrincipal" class="form-dark" type="text" placeholder="Ex: Reconstrução com IA">
+        </div>
+        <div class="form-row">
+          <label>Subtema / nicho específico</label>
+          <input id="cpSubtema" class="form-dark" type="text" placeholder="Ex: Batalhas medievais europeias séc. XIII–XV">
+        </div>
+        <div class="form-row">
+          <label>Tipo de canal</label>
+          <input id="cpTipoCanal" class="form-dark" type="text" placeholder="Ex: Documentário histórico narrado com IA visual">
+        </div>
+        <div class="form-row">
+          <label>Direcionamento narrativo <span style="color:var(--muted);font-size:.72rem">(tom e registro — não prescreva estrutura)</span></label>
+          <input id="cpInstrucoesRoteiro" class="form-dark" type="text" placeholder="Ex: Tom sério e imersivo, linguagem acessível, topo de funil">
+        </div>
+        <div class="form-row">
+          <label>Instruções visuais <span style="color:var(--muted);font-size:.72rem">(restrições de época para DOTTI)</span></label>
+          <textarea id="cpInstrucoesVisuais" class="form-dark" rows="2" placeholder="Ex: Apenas Europa medieval séc. XIII–XV. Proibido elementos modernos, fantasia ou anacronismos." style="resize:vertical"></textarea>
+        </div>
+
+        <!-- AI Preview box (hidden until AI returns suggestion) -->
+        <div id="cpPreviewBox" style="display:none;background:rgba(56,139,253,.08);border:1px solid rgba(56,139,253,.3);border-radius:10px;padding:1rem;flex-direction:column;gap:.75rem">
+          <div style="font-size:.8rem;font-weight:700;color:var(--blue)"><i class="bi bi-stars"></i> Sugestão da IA — revise e confirme</div>
+          <div class="form-row">
+            <label style="color:var(--blue)">Tema principal</label>
+            <input id="cpPreviewTemaPrincipal" class="form-dark" type="text">
+          </div>
+          <div class="form-row">
+            <label style="color:var(--blue)">Subtema</label>
+            <input id="cpPreviewSubtema" class="form-dark" type="text">
+          </div>
+          <div class="form-row">
+            <label style="color:var(--blue)">Tipo de canal</label>
+            <input id="cpPreviewTipoCanal" class="form-dark" type="text">
+          </div>
+          <div class="form-row">
+            <label style="color:var(--blue)">Direcionamento narrativo</label>
+            <input id="cpPreviewInstrucoesRoteiro" class="form-dark" type="text">
+          </div>
+          <div class="form-row">
+            <label style="color:var(--blue)">Instruções visuais</label>
+            <textarea id="cpPreviewInstrucoesVisuais" class="form-dark" rows="2" style="resize:vertical"></textarea>
+          </div>
+          <button class="btn-accent" onclick="applyAiPreview()" style="align-self:flex-start">
+            <i class="bi bi-arrow-down-circle"></i> Aplicar sugestão nos campos acima
+          </button>
+        </div>
+
+      </div>
+      <div class="modal-footer" style="border-top:1px solid var(--border)">
+        <button class="btn-outline" data-bs-dismiss="modal">Cancelar</button>
+        <button id="cpSaveBtn" class="btn-accent" onclick="saveChannelProfile()">
+          <i class="bi bi-check-lg"></i> Salvar
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
 </body>
 </html>

@@ -737,6 +737,13 @@ def api_script_generate(prod_id):
     }
     target_lang = _lang_names.get(lang_code, lang_code)
 
+    # Channel profile fields for context injection
+    _ch = channel or {}
+    _tema_principal     = _ch.get("tema_principal", "").strip()
+    _subtema            = _ch.get("subtema", "").strip()
+    _tipo_canal         = _ch.get("tipo_canal", "").strip()
+    _instrucoes_roteiro = _ch.get("instrucoes_roteiro", "").strip()
+
     # Load styles (hot-reload: edits take effect without restart)
     _styles_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts", "script_styles.py")
     _spec = _importlib.util.spec_from_file_location("script_styles", _styles_path)
@@ -756,6 +763,36 @@ def api_script_generate(prod_id):
         " Battles and conflicts must be framed from a historical and analytical perspective."
         " Executions, deaths, and suffering must be referenced factually and briefly, never sensationalized."
         " Content must comply with YouTube's advertiser-friendly guidelines at all times."
+    )
+
+    # Channel profile injection — omit individual lines if field is empty;
+    # omit entire block if all fields are empty
+    _profile_lines = []
+    if _tema_principal:
+        _profile_lines.append(f"Tema principal: {_tema_principal}")
+    if _subtema:
+        _profile_lines.append(f"Subtema: {_subtema}")
+    if _tipo_canal:
+        _profile_lines.append(f"Tipo: {_tipo_canal}")
+    if _instrucoes_roteiro:
+        _profile_lines.append(f"Direcionamento narrativo: {_instrucoes_roteiro}")
+    if _profile_lines:
+        system_prompt += "\n\nPERFIL DO CANAL:\n" + "\n".join(_profile_lines)
+
+    # Structural variation — always injected so scripts don't repeat the same opening pattern
+    system_prompt += (
+        "\n\nVARIAÇÃO ESTRUTURAL OBRIGATÓRIA:\n"
+        "Cada roteiro deve começar de forma estruturalmente diferente dos roteiros padrão de IA.\n"
+        "Escolha UMA das seguintes abordagens de abertura (varie entre vídeos, nunca repita a mesma):\n"
+        "- Começar com uma pergunta retórica provocativa\n"
+        "- Começar in media res (no meio de uma cena ou evento)\n"
+        "- Começar com um dado ou estatística surpreendente\n"
+        "- Começar com uma citação histórica ou frase atribuída\n"
+        "- Começar com uma descrição sensorial de lugar/tempo\n"
+        "- Começar com uma contradição ou paradoxo histórico\n"
+        "- Começar com a conclusão e trabalhar o caminho até ela\n\n"
+        "A estrutura interna também deve variar: nem sempre cronológica, nem sempre 3 atos.\n"
+        "O objetivo é que cada vídeo pareça escrito por um narrador diferente com perspectiva própria."
     )
 
     existing_ts = (prod.get("tasks") or {}).get("transcription", {})
@@ -815,6 +852,88 @@ def api_production_channel(prod_id):
     if not prod:
         return jsonify({"error": "Produção não encontrada"}), 404
     return jsonify(database.get_channel(prod["channel_id"]))
+
+
+@app.route("/api/channels/<int:channel_id>", methods=["GET"])
+def api_channel_get(channel_id):
+    """Return a single channel by id."""
+    ch = database.get_channel(channel_id)
+    if not ch:
+        return jsonify({"error": "Canal não encontrado"}), 404
+    return jsonify(ch)
+
+
+@app.route("/api/channels/<int:channel_id>", methods=["PUT"])
+def api_channel_update(channel_id):
+    """Update channel fields (profile + basic info). Accepts any subset of allowed fields."""
+    ch = database.get_channel(channel_id)
+    if not ch:
+        return jsonify({"error": "Canal não encontrado"}), 404
+    body = request.get_json(force=True) or {}
+    allowed = {
+        "name", "language_code", "flag", "description",
+        "tema_principal", "subtema", "tipo_canal",
+        "instrucoes_roteiro", "instrucoes_visuais",
+    }
+    fields = {k: str(v) for k, v in body.items() if k in allowed}
+    if not fields:
+        return jsonify({"error": "Nenhum campo válido para atualizar"}), 400
+    database.update_channel(channel_id, **fields)
+    return jsonify(database.get_channel(channel_id))
+
+
+@app.route("/api/channels/<int:channel_id>/generate-profile", methods=["POST"])
+def api_channel_generate_profile(channel_id):
+    """Use Claude to analyse channel productions and suggest a structured profile.
+    Returns {profile: {tema_principal, subtema, tipo_canal, instrucoes_roteiro, instrucoes_visuais}}.
+    Never saves automatically — caller must confirm via PUT /api/channels/<id>."""
+    import json as _json, re as _re
+    ch = database.get_channel(channel_id)
+    if not ch:
+        return jsonify({"error": "Canal não encontrado"}), 404
+
+    prods = database.get_productions(channel_id)[:10]
+    samples = []
+    for p in prods:
+        title  = (p.get("adapted_title") or p.get("source_title", "")).strip()
+        script = (p.get("tasks") or {}).get("script", {}).get("result_text", "")[:500]
+        if title or script:
+            samples.append(f"Título: {title}\nRoteiro (trecho): {script}")
+
+    if not samples:
+        return jsonify({"error": "Canal sem produções para analisar"}), 400
+
+    samples_text = "\n\n---\n\n".join(samples)
+    user_msg = (
+        "Analise as produções abaixo de um canal do YouTube e gere um perfil estruturado.\n\n"
+        f"PRODUÇÕES DO CANAL:\n{samples_text}\n\n"
+        "Retorne APENAS um JSON válido com exatamente estes 5 campos:\n"
+        '{"tema_principal": "...", "subtema": "...", "tipo_canal": "...", '
+        '"instrucoes_roteiro": "...", "instrucoes_visuais": "..."}\n\n'
+        "instrucoes_roteiro: direcionamento de TOM e REGISTRO apenas "
+        "(ex: 'Tom sério e imersivo, linguagem acessível, topo de funil'). "
+        "NUNCA prescreva estrutura narrativa, tipo de abertura ou sequência de seções.\n"
+        "instrucoes_visuais: restrições de época, estilo e anacronismos para geração de imagens "
+        "(ex: 'Apenas Europa medieval séc. XIII–XV. Proibido elementos modernos ou fantasia.')."
+    )
+
+    try:
+        import anthropic as _anthropic
+        client = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        with client.messages.stream(
+            model=CLAUDE_MODEL,
+            max_tokens=1000,
+            messages=[{"role": "user", "content": user_msg}],
+        ) as stream:
+            result = stream.get_final_text()
+        m = _re.search(r'\{[\s\S]*?\}', result)
+        if not m:
+            return jsonify({"error": "Resposta inválida da IA — JSON não encontrado"}), 500
+        profile = _json.loads(m.group(0))
+        return jsonify({"profile": profile})
+    except Exception as exc:
+        print(f"[GenerateProfile] channel={channel_id} error: {exc}")
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/api/youtube/video-info", methods=["POST"])
@@ -1036,11 +1155,8 @@ def _auto_trigger_description(prod_id: int):
             return
         title = prod.get("adapted_title") or prod.get("source_title", "")
         channel = database.get_channel(prod["channel_id"])
-        lang_code = (channel or {}).get("language_code", "it")
-        lang_name = {
-            "it": "Italian", "pt": "Portuguese", "es": "Spanish",
-            "de": "German", "fr": "French", "ro": "Romanian", "pl": "Polish",
-        }.get(lang_code, "Italian")
+        lang_code = (channel or {}).get("language_code", "pt")
+        lang_name = _LANG_MAP.get(lang_code, "portuguese").capitalize()
 
         database.set_task_status(prod_id, "description", "in_progress")
         import anthropic as _anthropic
@@ -1265,18 +1381,143 @@ def api_transcription_auto(prod_id):
 
 # ── Prompts Veo3 generation (DOTTI agent) ─────────────────────────────────────
 
-def _bg_prompts(job_id, prod_id, user_msg):
-    """Background thread: calls Claude DOTTI agent and saves prompts to DB."""
+def _extract_dotti_anchor(script_text: str) -> dict | None:
+    """Phase 0: call Claude to extract historical/geographic anchor from script.
+    Returns dict {periodo, localizacao, restricoes} or None on any failure (non-blocking)."""
+    import json as _json, re as _re
     try:
+        import anthropic as _anthropic
+        client = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        user_msg = (
+            "Leia o roteiro abaixo e extraia o contexto histórico/geográfico para ancorar os prompts visuais.\n\n"
+            "Retorne APENAS um JSON válido com exatamente estes 3 campos:\n"
+            '{"periodo": "...", "localizacao": "...", "restricoes": ["...", "..."]}\n\n'
+            "periodo: período histórico e época (ex: 'Bizâncio, séc. X, reinado de Constantino VII')\n"
+            "localizacao: localizações principais citadas no roteiro\n"
+            "restricoes: lista de elementos que NÃO devem aparecer visualmente "
+            "(ex: 'anacronismos', 'elementos modernos', 'personagens identificáveis')\n\n"
+            f"ROTEIRO:\n{script_text[:8000]}"
+        )
+        with client.messages.stream(
+            model=CLAUDE_MODEL,
+            max_tokens=500,
+            messages=[{"role": "user", "content": user_msg}],
+        ) as stream:
+            result = stream.get_final_text()
+        m = _re.search(r'\{[\s\S]*?\}', result)
+        if not m:
+            print("[DOTTI Phase0] JSON não encontrado na resposta — âncora ignorada")
+            return None
+        anchor = _json.loads(m.group(0))
+        if not anchor.get("periodo"):
+            print("[DOTTI Phase0] âncora incompleta — ignorada")
+            return None
+        print(f"[DOTTI Phase0] âncora extraída: {anchor.get('periodo')}")
+        return anchor
+    except Exception as exc:
+        print(f"[DOTTI Phase0] erro (ignorado, geração continua): {exc}")
+        return None
+
+
+def _validate_and_fix_prompts(text: str) -> str:
+    """Post-generation: fix prompt sequential numbering and timestamp overlaps.
+    Anchors regex to PROMPT NNN [...] | MM:SS - MM:SS to avoid false positives.
+    Gaps between prompts are kept (valid in Veo3 Flow); only overlaps are fixed."""
+    import re as _re
+
+    pattern = _re.compile(
+        r'(PROMPT\s+)(\d+)(\s*\[.*?\]\s*\|\s*)(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})',
+        _re.IGNORECASE,
+    )
+    matches = list(pattern.finditer(text))
+    if not matches:
+        return text
+
+    def _to_sec(ts: str) -> int:
+        parts = ts.strip().split(':')
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        return int(parts[0]) * 60 + int(parts[1])
+
+    def _from_sec(s: int) -> str:
+        return f"{s // 60:02d}:{s % 60:02d}"
+
+    numbers = [int(m.group(2)) for m in matches]
+    starts  = [_to_sec(m.group(4)) for m in matches]
+    ends    = [_to_sec(m.group(5)) for m in matches]
+
+    corrections = []
+
+    # A) Fix sequential numbering (gaps / duplicates)
+    expected = list(range(1, len(numbers) + 1))
+    if numbers != expected:
+        corrections.append(f"Numeração corrigida de {numbers[:5]}… → sequencial 001-{len(numbers):03d}")
+        numbers = expected
+
+    # B) Fix timestamp overlaps (start must be ≥ previous end)
+    for i in range(1, len(starts)):
+        if starts[i] < ends[i - 1]:
+            corrections.append(
+                f"Sobreposição PROMPT {numbers[i]:03d}: início {_from_sec(starts[i])} "
+                f"< fim anterior {_from_sec(ends[i - 1])} → ajustado"
+            )
+            starts[i] = ends[i - 1]
+
+    if not corrections:
+        return text
+
+    # Apply corrections back to front to preserve string positions
+    result = text
+    for i in range(len(matches) - 1, -1, -1):
+        m = matches[i]
+        new_fragment = (
+            f"{m.group(1)}{numbers[i]:03d}{m.group(3)}"
+            f"{_from_sec(starts[i])} - {_from_sec(ends[i])}"
+        )
+        result = result[:m.start()] + new_fragment + result[m.end():]
+
+    for c in corrections:
+        print(f"[Prompts Validate] {c}")
+
+    return result
+
+
+def _bg_prompts(job_id, prod_id, user_msg, script_text: str = "", instrucoes_visuais: str = ""):
+    """Background thread: Phase 0 anchor → Claude DOTTI → validate/fix → save to DB."""
+    try:
+        # Phase 0: extract contextual anchor (non-blocking — failure is silently ignored)
+        anchor = _extract_dotti_anchor(script_text) if script_text else None
+
+        final_user_msg = user_msg
+        if anchor:
+            restricoes = anchor.get("restricoes", [])
+            restricoes_str = (
+                "; ".join(restricoes) if isinstance(restricoes, list) else str(restricoes)
+            )
+            anchor_block = (
+                "ÂNCORA CONTEXTUAL DO EPISÓDIO (extraída do roteiro — respeitar rigorosamente):\n"
+                f"Período: {anchor.get('periodo', '')}\n"
+                f"Localização: {anchor.get('localizacao', '')}\n"
+                f"Restrições absolutas de cena: {restricoes_str}\n"
+            )
+            if instrucoes_visuais:
+                anchor_block += f"\nPERFIL VISUAL DO CANAL:\n{instrucoes_visuais}\n"
+            anchor_block += "\n"
+            final_user_msg = anchor_block + final_user_msg
+
         import anthropic as _anthropic
         client = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
         with client.messages.stream(
             model=CLAUDE_MODEL,
             max_tokens=_model_max_tokens(CLAUDE_MODEL),
             system=DOTTI_SYSTEM,
-            messages=[{"role": "user", "content": user_msg}],
+            messages=[{"role": "user", "content": final_user_msg}],
         ) as stream:
             prompts_text = stream.get_final_text()
+
+        # Validate and fix numbering + timestamp overlaps
+        prompts_text = _validate_and_fix_prompts(prompts_text)
+
         database.upsert_task(prod_id, "prompts", "done", result_text=prompts_text)
         _claude_jobs[job_id].update(status="done")
         print(f"[Prompts BG] prod={prod_id} done tokens≈{len(prompts_text)//4}")
@@ -1364,6 +1605,10 @@ def api_prompts_generate(prod_id):
     if not script_text:
         return jsonify({"error": "Gere o roteiro primeiro"}), 400
 
+    # Channel visual instructions for DOTTI Phase 0 anchor injection
+    channel = database.get_channel(prod["channel_id"])
+    instrucoes_visuais = (channel or {}).get("instrucoes_visuais", "").strip()
+
     user_msg = f"ROTEIRO:\n{script_text}"
     if transcription:
         user_msg += f"\n\nSINCRONIZAÇÃO (transcrição em blocos de 8 segundos):\n{transcription}"
@@ -1380,7 +1625,11 @@ def api_prompts_generate(prod_id):
     job_id = str(uuid.uuid4())[:12]
     _claude_jobs[job_id] = {"prod_id": prod_id, "task_type": "prompts", "status": "running", "error": None}
     database.set_task_status(prod_id, "prompts", "in_progress")
-    threading.Thread(target=_bg_prompts, args=(job_id, prod_id, user_msg), daemon=True).start()
+    threading.Thread(
+        target=_bg_prompts,
+        args=(job_id, prod_id, user_msg, script_text, instrucoes_visuais),
+        daemon=True,
+    ).start()
     print(f"[Prompts] prod={prod_id} queued job={job_id}")
     return jsonify({"queued": True, "job_id": job_id})
 

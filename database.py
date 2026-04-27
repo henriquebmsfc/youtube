@@ -193,12 +193,17 @@ def init_production_tables():
     c = conn.cursor()
     c.executescript('''
         CREATE TABLE IF NOT EXISTS channels (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            name          TEXT NOT NULL,
-            language_code TEXT NOT NULL,
-            flag          TEXT DEFAULT "",
-            description   TEXT DEFAULT "",
-            created_at    TEXT DEFAULT CURRENT_TIMESTAMP
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            name               TEXT NOT NULL,
+            language_code      TEXT NOT NULL,
+            flag               TEXT DEFAULT "",
+            description        TEXT DEFAULT "",
+            tema_principal     TEXT DEFAULT "",
+            subtema            TEXT DEFAULT "",
+            tipo_canal         TEXT DEFAULT "",
+            instrucoes_roteiro TEXT DEFAULT "",
+            instrucoes_visuais TEXT DEFAULT "",
+            created_at         TEXT DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE TABLE IF NOT EXISTS productions (
@@ -225,6 +230,19 @@ def init_production_tables():
             updated_at    TEXT DEFAULT CURRENT_TIMESTAMP
         );
     ''')
+    # Migration: add 5 channel profile columns to existing databases
+    for col, definition in [
+        ("tema_principal",     "TEXT DEFAULT ''"),
+        ("subtema",            "TEXT DEFAULT ''"),
+        ("tipo_canal",         "TEXT DEFAULT ''"),
+        ("instrucoes_roteiro", "TEXT DEFAULT ''"),
+        ("instrucoes_visuais", "TEXT DEFAULT ''"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE channels ADD COLUMN {col} {definition}")
+        except Exception:
+            pass  # column already exists
+
     # Migration: add any missing task types to existing productions
     for task_type in ('thumbnails', 'description'):
         for row in conn.execute("SELECT id FROM productions").fetchall():
@@ -301,6 +319,27 @@ def get_channel(channel_id: int) -> dict | None:
 def delete_channel(channel_id: int):
     conn = sqlite3.connect(DB_PATH)
     conn.execute('DELETE FROM channels WHERE id = ?', (channel_id,))
+    conn.commit()
+    conn.close()
+
+
+def update_channel(channel_id: int, **fields):
+    """Update arbitrary channel fields. Only touches columns present in `fields`.
+    Allowed fields: name, language_code, flag, description,
+    tema_principal, subtema, tipo_canal, instrucoes_roteiro, instrucoes_visuais."""
+    if not fields:
+        return
+    _allowed = {
+        "name", "language_code", "flag", "description",
+        "tema_principal", "subtema", "tipo_canal",
+        "instrucoes_roteiro", "instrucoes_visuais",
+    }
+    safe = {k: v for k, v in fields.items() if k in _allowed}
+    if not safe:
+        return
+    conn = sqlite3.connect(DB_PATH)
+    for k, v in safe.items():
+        conn.execute(f"UPDATE channels SET {k}=? WHERE id=?", (v, channel_id))
     conn.commit()
     conn.close()
 
