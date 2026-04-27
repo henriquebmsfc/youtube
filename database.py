@@ -237,6 +237,7 @@ def init_production_tables():
         ("tipo_canal",         "TEXT DEFAULT ''"),
         ("instrucoes_roteiro", "TEXT DEFAULT ''"),
         ("instrucoes_visuais", "TEXT DEFAULT ''"),
+        ("owner",              "TEXT DEFAULT ''"),
     ]:
         try:
             conn.execute(f"ALTER TABLE channels ADD COLUMN {col} {definition}")
@@ -332,7 +333,7 @@ def update_channel(channel_id: int, **fields):
     _allowed = {
         "name", "language_code", "flag", "description",
         "tema_principal", "subtema", "tipo_canal",
-        "instrucoes_roteiro", "instrucoes_visuais",
+        "instrucoes_roteiro", "instrucoes_visuais", "owner",
     }
     safe = {k: v for k, v in fields.items() if k in _allowed}
     if not safe:

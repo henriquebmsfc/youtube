@@ -490,9 +490,12 @@ def api_channels_create():
     lang  = (body.get("language_code") or "").strip()
     flag  = (body.get("flag") or "").strip()
     desc  = (body.get("description") or "").strip()
+    owner = (body.get("owner") or "").strip()
     if not name or not lang:
         return jsonify({"error": "Nome e idioma são obrigatórios"}), 400
     new_id = database.create_channel(name, lang, flag, desc)
+    if owner:
+        database.update_channel(new_id, owner=owner)
     return jsonify({"success": True, "id": new_id})
 
 
@@ -875,7 +878,7 @@ def api_channel_update(channel_id):
     allowed = {
         "name", "language_code", "flag", "description",
         "tema_principal", "subtema", "tipo_canal",
-        "instrucoes_roteiro", "instrucoes_visuais",
+        "instrucoes_roteiro", "instrucoes_visuais", "owner",
     }
     fields = {k: str(v) for k, v in body.items() if k in allowed}
     if not fields:
