@@ -238,7 +238,7 @@
         <div class="channel-card ${ownerClass}">
           <!-- Header: flag + name + delete -->
           <div style="display:flex;align-items:flex-start;gap:.875rem">
-            <div class="channel-flag">${ch.flag || FLAG_MAP[ch.language_code] || '🌐'}</div>
+            <div class="channel-flag">${FLAG_MAP[ch.language_code] || ch.flag || '🌐'}</div>
             <div style="flex:1;min-width:0">
               <div class="channel-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(ch.name)}</div>
               <div class="channel-lang">${LANG_NAME[ch.language_code] || ch.language_code}</div>

@@ -164,7 +164,7 @@
 
 <!-- Channel hero -->
 <div class="channel-hero">
-  <div class="hero-flag">{{ channel.flag or '📺' }}</div>
+  <div class="hero-flag">{% set _flag_map = {'pt':'🇧🇷','en':'🇺🇸','es':'🇪🇸','de':'🇩🇪','fr':'🇫🇷','it':'🇮🇹','ro':'🇷🇴','pl':'🇵🇱','hr':'🇭🇷','hu':'🇭🇺'} %}{{ _flag_map.get(channel.language_code) or channel.flag or '📺' }}</div>
   <div style="flex:1">
     <div class="hero-name">{{ channel.name }}</div>
     <div class="hero-meta">{{ channel.description or '' }}</div>
