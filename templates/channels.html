@@ -36,7 +36,7 @@
     .channel-card.owner-henrique { border-color: var(--owner-henrique); }
     .channel-card.owner-igor     { border-color: var(--owner-igor); }
     .channel-card.owner-gabriel  { border-color: var(--owner-gabriel); }
-    .channel-flag { font-size:2.5rem; line-height:1; }
+    .channel-flag { width:48px; height:36px; object-fit:cover; border-radius:4px; flex-shrink:0; }
     .channel-name { font-size:1rem; font-weight:700; margin-top:.2rem; }
     .channel-lang { font-size:.75rem; color:var(--muted); }
     .stat-pill { display:inline-flex; align-items:center; gap:.3rem; background:rgba(56,139,253,.08); color:var(--blue); border-radius:20px; padding:.18rem .55rem; font-size:.73rem; font-weight:600; }
@@ -200,8 +200,15 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-  const FLAG_MAP  = { pt:'🇧🇷', en:'🇺🇸', es:'🇪🇸', de:'🇩🇪', fr:'🇫🇷', it:'🇮🇹', ro:'🇷🇴', pl:'🇵🇱', hr:'🇭🇷', hu:'🇭🇺' };
+  // ISO 3166-1 alpha-2 country codes for flagcdn.com
+  const FLAG_MAP  = { pt:'br', en:'us', es:'es', de:'de', fr:'fr', it:'it', ro:'ro', pl:'pl', hr:'hr', hu:'hu' };
   const LANG_NAME = { pt:'Português', en:'English', es:'Español', de:'Deutsch', fr:'Français', it:'Italiano', ro:'Română', pl:'Polski', hr:'Hrvatski', hu:'Magyar' };
+
+  function flagImg(langCode, cls='channel-flag') {
+    const cc = FLAG_MAP[langCode];
+    if (!cc) return `<span style="font-size:1.8rem">🌐</span>`;
+    return `<img class="${cls}" src="https://flagcdn.com/w80/${cc}.png" alt="${langCode}" loading="lazy">`;
+  }
   const OWNERS    = ['', 'Henrique', 'Igor', 'Gabriel'];
   const OWNER_COLOR = { Henrique:'var(--owner-henrique)', Igor:'var(--owner-igor)', Gabriel:'var(--owner-gabriel)' };
 
@@ -225,7 +232,7 @@
     <div class="col-sm-6 col-lg-4">
       <div class="channel-card ${ownerClass}">
         <div style="display:flex;align-items:flex-start;gap:.875rem">
-          <div class="channel-flag">${FLAG_MAP[ch.language_code] || ch.flag || '🌐'}</div>
+          ${flagImg(ch.language_code)}
           <div style="flex:1;min-width:0">
             <div class="channel-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(ch.name)}</div>
             <div class="channel-lang">${LANG_NAME[ch.language_code] || ch.language_code}</div>
@@ -371,7 +378,7 @@
     // Populate channel select
     const sel = document.getElementById('url-channel-select');
     sel.innerHTML = channels.map(ch =>
-      `<option value="${ch.id}" ${ch.id == channelId ? 'selected' : ''}>${ch.flag || FLAG_MAP[ch.language_code] || ''} ${esc(ch.name)}</option>`
+      `<option value="${ch.id}" ${ch.id == channelId ? 'selected' : ''}>${(FLAG_MAP[ch.language_code] || '').toUpperCase()} ${esc(ch.name)}</option>`
     ).join('');
 
     new bootstrap.Modal(document.getElementById('modalAddUrl')).show();

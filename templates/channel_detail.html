@@ -164,7 +164,13 @@
 
 <!-- Channel hero -->
 <div class="channel-hero">
-  <div class="hero-flag">{% set _flag_map = {'pt':'🇧🇷','en':'🇺🇸','es':'🇪🇸','de':'🇩🇪','fr':'🇫🇷','it':'🇮🇹','ro':'🇷🇴','pl':'🇵🇱','hr':'🇭🇷','hu':'🇭🇺'} %}{{ _flag_map.get(channel.language_code) or channel.flag or '📺' }}</div>
+  {% set _cc_map = {'pt':'br','en':'us','es':'es','de':'de','fr':'fr','it':'it','ro':'ro','pl':'pl','hr':'hr','hu':'hu'} %}
+  {% set _cc = _cc_map.get(channel.language_code) %}
+  {% if _cc %}
+  <img src="https://flagcdn.com/w80/{{ _cc }}.png" alt="{{ channel.language_code }}" style="height:40px;border-radius:5px;object-fit:cover">
+  {% else %}
+  <div class="hero-flag">📺</div>
+  {% endif %}
   <div style="flex:1">
     <div class="hero-name">{{ channel.name }}</div>
     <div class="hero-meta">{{ channel.description or '' }}</div>
