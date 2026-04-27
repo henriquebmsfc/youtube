@@ -1383,8 +1383,11 @@ def api_transcription_auto(prod_id):
 
 # ── Prompts Veo3 generation (DOTTI agent) ─────────────────────────────────────
 
+_HAIKU_MODEL = "claude-3-5-haiku-20241022"  # fast + cheap for simple extraction tasks
+
+
 def _extract_dotti_anchor(script_text: str) -> dict | None:
-    """Phase 0: call Claude to extract historical/geographic anchor from script.
+    """Phase 0: call Claude Haiku (fast) to extract historical/geographic anchor from script.
     Returns dict {periodo, localizacao, restricoes} or None on any failure (non-blocking)."""
     import json as _json, re as _re
     try:
@@ -1401,7 +1404,7 @@ def _extract_dotti_anchor(script_text: str) -> dict | None:
             f"ROTEIRO:\n{script_text[:8000]}"
         )
         with client.messages.stream(
-            model=CLAUDE_MODEL,
+            model=_HAIKU_MODEL,
             max_tokens=500,
             messages=[{"role": "user", "content": user_msg}],
         ) as stream:
@@ -1486,9 +1489,13 @@ def _validate_and_fix_prompts(text: str) -> str:
 
 def _bg_prompts(job_id, prod_id, user_msg, script_text: str = "", instrucoes_visuais: str = ""):
     """Background thread: Phase 0 anchor → Claude DOTTI → validate/fix → save to DB."""
+    import time as _time
+    t0 = _time.time()
     try:
-        # Phase 0: extract contextual anchor (non-blocking — failure is silently ignored)
+        # Phase 0: extract contextual anchor using Haiku (fast, non-blocking)
+        t_phase0 = _time.time()
         anchor = _extract_dotti_anchor(script_text) if script_text else None
+        print(f"[Prompts BG] prod={prod_id} Phase0 {_time.time()-t_phase0:.1f}s anchor={'ok' if anchor else 'skip'}")
 
         final_user_msg = user_msg
         if anchor:
@@ -1509,6 +1516,7 @@ def _bg_prompts(job_id, prod_id, user_msg, script_text: str = "", instrucoes_vis
 
         import anthropic as _anthropic
         client = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        t_dotti = _time.time()
         with client.messages.stream(
             model=CLAUDE_MODEL,
             max_tokens=_model_max_tokens(CLAUDE_MODEL),
@@ -1516,18 +1524,19 @@ def _bg_prompts(job_id, prod_id, user_msg, script_text: str = "", instrucoes_vis
             messages=[{"role": "user", "content": final_user_msg}],
         ) as stream:
             prompts_text = stream.get_final_text()
+        print(f"[Prompts BG] prod={prod_id} DOTTI {_time.time()-t_dotti:.1f}s tokens≈{len(prompts_text)//4}")
 
         # Validate and fix numbering + timestamp overlaps
         prompts_text = _validate_and_fix_prompts(prompts_text)
 
         database.upsert_task(prod_id, "prompts", "done", result_text=prompts_text)
         _claude_jobs[job_id].update(status="done")
-        print(f"[Prompts BG] prod={prod_id} done tokens≈{len(prompts_text)//4}")
+        print(f"[Prompts BG] prod={prod_id} total {_time.time()-t0:.1f}s done")
     except Exception as exc:
         # Use set_task_status so that any previously completed result_text is preserved
         database.set_task_status(prod_id, "prompts", "pending", notes=f"Erro: {exc}")
         _claude_jobs[job_id].update(status="error", error=str(exc))
-        print(f"[Prompts BG] prod={prod_id} error: {exc}")
+        print(f"[Prompts BG] prod={prod_id} error after {_time.time()-t0:.1f}s: {exc}")
 
 
 @app.route("/api/productions/<int:prod_id>/tasks/description/generate", methods=["POST"])

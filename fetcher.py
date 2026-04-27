@@ -29,12 +29,15 @@ def _calculate_scores(views: int, likes: int, comments: int, published_at: str):
     # Views score: log scale, 1 M views → 100 (more sensitive to the real range)
     views_score = min(math.log10(views + 1) / math.log10(1_000_000) * 100, 100)
 
-    # Recency score: exponential decay, half-life = 2 days
-    # day 0 → 100, day 2 → 50, day 4 → 25, day 7 → 11
+    # Recency: hard cutoff at 20 days — older videos score 0 regardless of views
+    # Within 20 days: exponential decay half-life = 4 days
+    # day 0 → 100, day 4 → 50, day 8 → 25, day 20 → ~3
     try:
         pub = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
         days_old = (datetime.now(timezone.utc) - pub).days
-        recency = 100 * math.exp(-days_old * math.log(2) / 2)
+        if days_old > 20:
+            return round(engagement, 4), 0.0
+        recency = 100 * math.exp(-days_old * math.log(2) / 4)
     except Exception:
         recency = 50.0
 
