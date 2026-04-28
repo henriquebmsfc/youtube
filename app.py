@@ -553,7 +553,49 @@ def api_production_mark_posted(prod_id):
     if not database.get_production(prod_id):
         return jsonify({"error": "Produção não encontrada"}), 404
     database.mark_production_posted(prod_id)
+    _cleanup_media(prod_id)  # free disk space — audio + thumbs no longer needed
     return jsonify({"success": True})
+
+
+@app.route("/api/storage/stats")
+def api_storage_stats():
+    """Return disk usage breakdown for /data volume."""
+    import glob as _glob
+    def _dir_size(pattern):
+        files = _glob.glob(pattern)
+        return len(files), sum(os.path.getsize(f) for f in files if os.path.exists(f))
+
+    a_cnt, a_bytes = _dir_size(os.path.join(MEDIA_DIR, "audio", "*.mp3"))
+    t_cnt, t_bytes = _dir_size(os.path.join(MEDIA_DIR, "thumbs", "*.png"))
+    db_bytes = os.path.getsize(database.DB_PATH) if os.path.exists(database.DB_PATH) else 0
+    return jsonify({
+        "audio_count":  a_cnt,
+        "audio_bytes":  a_bytes,
+        "thumb_count":  t_cnt,
+        "thumb_bytes":  t_bytes,
+        "db_bytes":     db_bytes,
+        "total_bytes":  a_bytes + t_bytes + db_bytes,
+    })
+
+
+@app.route("/api/storage/cleanup-posted", methods=["POST"])
+def api_storage_cleanup_posted():
+    """Delete media files for all posted productions (retroactive cleanup)."""
+    import glob as _glob
+    import sqlite3 as _sq3
+    conn = _sq3.connect(database.DB_PATH)
+    rows = conn.execute("SELECT id FROM productions WHERE status='posted'").fetchall()
+    conn.close()
+    removed = 0
+    for (pid,) in rows:
+        for f in _glob.glob(os.path.join(MEDIA_DIR, "thumbs", f"{pid}_*.png")):
+            try: os.remove(f); removed += 1
+            except Exception: pass
+        ap = _media_audio_path(pid)
+        if os.path.exists(ap):
+            try: os.remove(ap); removed += 1
+            except Exception: pass
+    return jsonify({"success": True, "files_removed": removed})
 
 
 @app.route("/api/productions/<int:prod_id>/mark-active", methods=["POST"])

@@ -1881,6 +1881,7 @@
         { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' }).then(r => r.json());
       if (!r1.queued) throw new Error(r1.error || 'Erro ao iniciar roteiro');
       await _autoPollJob(r1.job_id, state);
+      await loadProductions();  // ✅ roteiro verde
 
       // 2 — Áudio
       if (state.cancelled) throw new Error('cancelled');
@@ -1891,6 +1892,7 @@
       }).then(r => r.json());
       if (!r2.success) throw new Error(r2.error || 'Erro ao iniciar áudio');
       await _autoPollAudio(prodId, r2.task_id, state);
+      await loadProductions();  // ✅ áudio verde
 
       // 3 — Aguardar 2 min
       if (state.cancelled) throw new Error('cancelled');
@@ -1903,6 +1905,7 @@
         { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' }).then(r => r.json());
       if (!r4.success) throw new Error(r4.error || 'Erro ao iniciar transcrição');
       await _autoPollTrans(r4.job_id, state);
+      await loadProductions();  // ✅ transcrição verde
 
       // 5 — Prompts Veo3
       if (state.cancelled) throw new Error('cancelled');

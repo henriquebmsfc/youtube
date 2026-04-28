@@ -107,6 +107,16 @@
       <div style="margin-top:.5rem;font-size:.85rem">Clique em <strong>Novo Canal</strong> para começar</div>
     </div>
   </div>
+
+  <!-- ── Storage bar ─────────────────────────────────────────────────────── -->
+  <div style="margin-top:2.5rem;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.75rem 1.1rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+    <span style="font-size:.8rem;font-weight:700;color:var(--muted);flex-shrink:0"><i class="bi bi-hdd"></i> Storage /data</span>
+    <span id="storageTotal" style="font-size:.82rem;font-weight:600;color:var(--text)">—</span>
+    <span id="storageDetail" style="font-size:.75rem;color:var(--muted)"></span>
+    <button onclick="cleanupPosted()" id="cleanupBtn" class="btn-outline" style="margin-left:auto;font-size:.76rem;padding:.28rem .65rem;flex-shrink:0">
+      <i class="bi bi-trash3"></i> Limpar arquivos de vídeos postados
+    </button>
+  </div>
 </main>
 
 <div id="toast"></div>
@@ -486,7 +496,43 @@
     t._timer = setTimeout(() => t.style.display = 'none', 4000);
   }
 
+  // ── Storage stats ─────────────────────────────────────────────────────────
+  function _fmtBytes(b) {
+    if (b >= 1e9) return (b / 1e9).toFixed(2) + ' GB';
+    if (b >= 1e6) return (b / 1e6).toFixed(1) + ' MB';
+    if (b >= 1e3) return (b / 1e3).toFixed(0) + ' KB';
+    return b + ' B';
+  }
+
+  async function loadStorageStats() {
+    try {
+      const s = await fetch('/api/storage/stats').then(r => r.json());
+      document.getElementById('storageTotal').textContent = _fmtBytes(s.total_bytes);
+      document.getElementById('storageDetail').textContent =
+        `Áudio: ${_fmtBytes(s.audio_bytes)} (${s.audio_count} arq.)  ·  Thumbs: ${_fmtBytes(s.thumb_bytes)} (${s.thumb_count} arq.)  ·  DB: ${_fmtBytes(s.db_bytes)}`;
+    } catch(e) {
+      document.getElementById('storageTotal').textContent = 'erro';
+    }
+  }
+
+  async function cleanupPosted() {
+    const btn = document.getElementById('cleanupBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:.8rem;height:.8rem"></span> Limpando…';
+    try {
+      const r = await fetch('/api/storage/cleanup-posted', { method: 'POST' }).then(r => r.json());
+      showToast(`🗑️ ${r.files_removed} arquivo(s) removido(s) com sucesso`, false);
+      loadStorageStats();
+    } catch(e) {
+      showToast('❌ Erro ao limpar arquivos', true);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-trash3"></i> Limpar arquivos de vídeos postados';
+    }
+  }
+
   loadChannels();
+  loadStorageStats();
 </script>
 </body>
 </html>
