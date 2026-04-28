@@ -1562,9 +1562,20 @@ def _bg_prompts(job_id, prod_id, user_msg, script_text: str = "", instrucoes_vis
         import anthropic as _anthropic
         client = _anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
         t_dotti = _time.time()
-        # Cap DOTTI at 16 000 output tokens (~80 prompts × 200 tokens each)
-        # to avoid 4-6 min waits on very long scripts
-        dotti_max_tokens = min(16_000, _model_max_tokens(CLAUDE_MODEL))
+
+        # Dynamic token budget: read actual block count from transcription footer
+        # ("Total: N blocos de 8 segundos cada"), then budget 380 tokens/prompt + 20%.
+        # Falls back to script word-count estimate when no transcription is available.
+        import re as _re_tok
+        _m_blocks = _re_tok.search(r'Total:\s*(\d+)\s+blocos', user_msg)
+        if _m_blocks:
+            _n_blocks = int(_m_blocks.group(1))
+        else:
+            _word_count = len(user_msg.split())
+            _n_blocks = max(20, int(_word_count / 130 * 60 / 8))
+        _tokens_needed = int(_n_blocks * 380 * 1.2)  # 380 tok/prompt, 20 % buffer
+        dotti_max_tokens = min(_tokens_needed, _model_max_tokens(CLAUDE_MODEL))
+        print(f"[Prompts BG] prod={prod_id} blocos={_n_blocks} max_tokens={dotti_max_tokens}")
         with client.messages.stream(
             model=CLAUDE_MODEL,
             max_tokens=dotti_max_tokens,
