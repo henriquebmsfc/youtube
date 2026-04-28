@@ -95,6 +95,10 @@
     .btn-outline:hover { border-color:var(--blue); color:var(--blue); }
     .btn-danger  { background:rgba(218,54,51,.12); border:1px solid rgba(218,54,51,.3); color:var(--red); padding:.3rem .7rem; border-radius:8px; font-size:.75rem; cursor:pointer; transition:all .15s; }
     .btn-danger:hover { background:rgba(218,54,51,.25); }
+    /* Auto-generate strip */
+    .auto-strip { margin-top:.5rem; background:rgba(188,140,255,.07); border:1px solid rgba(188,140,255,.25); border-radius:8px; padding:.45rem .875rem; font-size:.8rem; }
+    .btn-auto { background:rgba(188,140,255,.1); border:1px solid rgba(188,140,255,.3); color:var(--purple); padding:.3rem .75rem; border-radius:8px; font-size:.78rem; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:.35rem; transition:all .15s; }
+    .btn-auto:hover { background:rgba(188,140,255,.22); }
     /* Inline title edit */
     .prod-title-row { display:flex; align-items:center; gap:.4rem; }
     .edit-title-btn { background:none; border:none; color:var(--muted); cursor:pointer; font-size:.72rem; padding:.1rem .3rem; border-radius:4px; opacity:0; transition:opacity .15s; flex-shrink:0; }
@@ -302,6 +306,8 @@
   const CHANNEL_LANG     = "{{ channel.language_code }}";
   const DEFAULT_VOICE_ID = "{{ config.DEFAULT_VOICE_ID }}";
 
+  const _autoJobs = {};   // prodId → {cancelled, msg, detail}
+
   const TASK_META = {
     script:        { icon:'📝', label:'Roteiro',     action:'panel' },
     audio:         { icon:'🎙️', label:'Áudio',        action:'panel' },
@@ -437,7 +443,20 @@
             </button>
           </div>
           <div class="prod-body">
-            <div class="task-bar">${taskBtns}</div>
+            <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+              <div class="task-bar" style="flex:1">${taskBtns}</div>
+              ${_autoJobs[p.id]
+                ? `<button class="btn-danger" style="font-size:.75rem;padding:.28rem .65rem;flex-shrink:0" onclick="cancelAutoGenerate(${p.id})">
+                     <i class="bi bi-stop-circle"></i> Cancelar
+                   </button>`
+                : `<button class="btn-auto" onclick="startAutoGenerate(${p.id})" title="Gerar roteiro → áudio → transcrição → prompts automaticamente">
+                     <i class="bi bi-lightning-charge-fill"></i> Gerar Tudo
+                   </button>`}
+            </div>
+            <div id="auto-status-${p.id}" class="auto-strip" style="display:${_autoJobs[p.id] ? 'block' : 'none'}">
+              ${_autoJobs[p.id] ? `<span style="color:var(--purple);font-weight:600"><span class="spinning" style="display:inline-block">⟳</span> ${_autoJobs[p.id].msg || '⚡ Iniciando…'}</span>
+              ${_autoJobs[p.id].detail ? `<div style="color:var(--muted);font-size:.72rem;margin-top:.1rem">${_autoJobs[p.id].detail}</div>` : ''}` : ''}
+            </div>
           </div>
         </div>`;
     }).join('');
@@ -1766,6 +1785,145 @@
   }
 
   loadProductions();
+
+  // ── Auto-generate all tasks ───────────────────────────────────────────────
+
+  function _autoSetStatus(prodId, msg, detail = '') {
+    if (!_autoJobs[prodId]) return;
+    _autoJobs[prodId].msg    = msg;
+    _autoJobs[prodId].detail = detail;
+    const el = document.getElementById(`auto-status-${prodId}`);
+    if (!el) return;
+    el.style.display = 'block';
+    el.innerHTML = `<span style="color:var(--purple);font-weight:600"><span class="spinning" style="display:inline-block">⟳</span> ${msg}</span>
+      ${detail ? `<div style="color:var(--muted);font-size:.72rem;margin-top:.1rem">${detail}</div>` : ''}`;
+  }
+
+  function _autoFinish(prodId, ok, msg) {
+    delete _autoJobs[prodId];
+    const el = document.getElementById(`auto-status-${prodId}`);
+    if (el) {
+      el.innerHTML = `<span style="color:var(--${ok ? 'green' : 'red'});font-weight:600">
+        <i class="bi bi-${ok ? 'check-circle-fill' : 'x-circle-fill'}"></i> ${msg}</span>`;
+      setTimeout(() => loadProductions(), ok ? 2000 : 3500);
+    } else {
+      loadProductions();
+    }
+  }
+
+  function cancelAutoGenerate(prodId) {
+    if (_autoJobs[prodId]) _autoJobs[prodId].cancelled = true;
+  }
+
+  function _autoPollJob(jobId, state) {
+    return new Promise((resolve, reject) => {
+      const t = setInterval(async () => {
+        if (state.cancelled) { clearInterval(t); reject(new Error('cancelled')); return; }
+        try {
+          const d = await fetch(`/api/jobs/${jobId}`).then(r => r.json());
+          if (d.status === 'done')  { clearInterval(t); resolve(); }
+          else if (d.status === 'error') { clearInterval(t); reject(new Error(d.error || 'Erro')); }
+        } catch(e) {}
+      }, 3000);
+    });
+  }
+
+  function _autoPollAudio(prodId, taskId, state) {
+    return new Promise((resolve, reject) => {
+      const t = setInterval(async () => {
+        if (state.cancelled) { clearInterval(t); reject(new Error('cancelled')); return; }
+        try {
+          const d = await fetch(`/api/productions/${prodId}/tasks/audio/status/${taskId}`).then(r => r.json());
+          if (d.status === 'completed' || d.status === 'done') { clearInterval(t); resolve(); }
+          else if (d.status === 'failed') { clearInterval(t); reject(new Error(d.error || 'Falha no áudio')); }
+        } catch(e) {}
+      }, 4000);
+    });
+  }
+
+  function _autoPollTrans(jobId, state) {
+    return new Promise((resolve, reject) => {
+      const t = setInterval(async () => {
+        if (state.cancelled) { clearInterval(t); reject(new Error('cancelled')); return; }
+        try {
+          const d = await fetch(`/api/transcribe/status/${jobId}`).then(r => r.json());
+          if (d.status === 'done')  { clearInterval(t); resolve(); }
+          else if (d.status === 'error') { clearInterval(t); reject(new Error(d.error || 'Erro na transcrição')); }
+        } catch(e) {}
+      }, 3000);
+    });
+  }
+
+  function _autoCountdown(prodId, seconds, state) {
+    return new Promise((resolve, reject) => {
+      let rem = seconds;
+      const tick = () => {
+        if (state.cancelled) { reject(new Error('cancelled')); return; }
+        if (rem <= 0) { resolve(); return; }
+        _autoSetStatus(prodId, `⏱ Aguardando ${rem}s…`, 'Processamento do áudio na GenAIPro antes de transcrever');
+        rem--;
+        setTimeout(tick, 1000);
+      };
+      tick();
+    });
+  }
+
+  async function startAutoGenerate(prodId) {
+    if (_autoJobs[prodId]) return;
+    const state = { cancelled: false, msg: '', detail: '' };
+    _autoJobs[prodId] = state;
+    renderProductions();  // mostra botão "Cancelar" + strip
+
+    try {
+      // 1 — Roteiro
+      _autoSetStatus(prodId, '📝 Gerando roteiro…', 'Claude está escrevendo o roteiro');
+      const r1 = await fetch(`/api/productions/${prodId}/tasks/script/generate`,
+        { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' }).then(r => r.json());
+      if (!r1.queued) throw new Error(r1.error || 'Erro ao iniciar roteiro');
+      await _autoPollJob(r1.job_id, state);
+
+      // 2 — Áudio
+      if (state.cancelled) throw new Error('cancelled');
+      _autoSetStatus(prodId, '🎙️ Gerando áudio…', 'ElevenLabs processando o roteiro');
+      const r2 = await fetch(`/api/productions/${prodId}/tasks/audio/generate`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ voice_id:'TumdjBNWanlT3ysvclWh', model_id:'eleven_multilingual_v2', speed:0.9, stability:0.5, similarity:0.75 }),
+      }).then(r => r.json());
+      if (!r2.success) throw new Error(r2.error || 'Erro ao iniciar áudio');
+      await _autoPollAudio(prodId, r2.task_id, state);
+
+      // 3 — Aguardar 2 min
+      if (state.cancelled) throw new Error('cancelled');
+      await _autoCountdown(prodId, 120, state);
+
+      // 4 — Transcrição
+      if (state.cancelled) throw new Error('cancelled');
+      _autoSetStatus(prodId, '📋 Transcrevendo…', 'Convertendo áudio em blocos de 8s para o DOTTI');
+      const r4 = await fetch(`/api/productions/${prodId}/tasks/transcription/auto`,
+        { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' }).then(r => r.json());
+      if (!r4.success) throw new Error(r4.error || 'Erro ao iniciar transcrição');
+      await _autoPollTrans(r4.job_id, state);
+
+      // 5 — Prompts Veo3
+      if (state.cancelled) throw new Error('cancelled');
+      _autoSetStatus(prodId, '🎬 Gerando prompts Veo3…', 'DOTTI sincronizando cenas com a transcrição');
+      const r5 = await fetch(`/api/productions/${prodId}/tasks/prompts/generate`,
+        { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' }).then(r => r.json());
+      if (!r5.queued) throw new Error(r5.error || 'Erro ao iniciar prompts');
+      await _autoPollJob(r5.job_id, state);
+
+      _autoFinish(prodId, true, 'Tudo pronto! Roteiro · Áudio · Transcrição · Prompts ✓');
+      showToast('⚡ Geração automática concluída!', false);
+
+    } catch(e) {
+      if (e.message === 'cancelled') {
+        _autoFinish(prodId, false, 'Geração cancelada');
+      } else {
+        _autoFinish(prodId, false, 'Erro: ' + e.message);
+        showToast('❌ Auto-geração: ' + e.message, true);
+      }
+    }
+  }
 
   // ── Channel Profile Modal ──────────────────────────────────────────────────
 
