@@ -1254,22 +1254,38 @@ def api_audio_download(prod_id):
 
     local_path = _media_audio_path(prod_id)
 
-    # Serve from local cache if available
+    # Serve from local cache if available and non-empty
     if os.path.exists(local_path):
-        return send_file(local_path, as_attachment=True, download_name=filename, mimetype="audio/mpeg")
+        if os.path.getsize(local_path) > 0:
+            return send_file(local_path, as_attachment=True, download_name=filename, mimetype="audio/mpeg")
+        else:
+            # Stale 0-byte file from a previous failed cache attempt — remove and re-download
+            print(f"[Audio download] prod={prod_id}: removing 0-byte cache file, re-downloading")
+            try:
+                os.remove(local_path)
+            except Exception:
+                pass
 
     # Otherwise download from GenAIPro, cache, then serve
     audio_url = audio_data.get("audio_url", "")
     if not audio_url:
-        return jsonify({"error": "URL de áudio não disponível"}), 404
+        return jsonify({"error": "URL de áudio não disponível — regere o áudio"}), 404
 
-    r = http_requests.get(audio_url, timeout=120)
-    r.raise_for_status()
+    try:
+        r = http_requests.get(audio_url, timeout=120)
+        r.raise_for_status()
+    except Exception as _dl_err:
+        print(f"[Audio download] prod={prod_id}: URL expired or unreachable: {_dl_err}")
+        return jsonify({"error": "URL do áudio expirou — regere o áudio para obter um novo link"}), 410
+
+    if not r.content:
+        return jsonify({"error": "Resposta vazia do servidor de áudio — regere o áudio"}), 502
 
     # Save to cache
     try:
         with open(local_path, "wb") as _f:
             _f.write(r.content)
+        print(f"[Audio download] prod={prod_id}: cached {len(r.content)//1024}KB")
         return send_file(local_path, as_attachment=True, download_name=filename, mimetype="audio/mpeg")
     except Exception as _cache_err:
         print(f"[Audio cache] write error: {_cache_err} — streaming directly")
@@ -1305,16 +1321,23 @@ def api_audio_status(prod_id, task_id):
             # Auto-cache audio file locally so it persists without user interaction
             def _cache_audio(pid, url):
                 local = _media_audio_path(pid)
-                if os.path.exists(local):
-                    return  # already cached
+                if os.path.exists(local) and os.path.getsize(local) > 0:
+                    return  # already cached and valid
                 try:
                     resp = http_requests.get(url, timeout=180)
                     resp.raise_for_status()
+                    if not resp.content:
+                        print(f"[Audio cache] prod={pid} empty response — not caching")
+                        return
                     with open(local, "wb") as _f:
                         _f.write(resp.content)
                     print(f"[Audio cache] prod={pid} saved ({len(resp.content)//1024}KB)")
                 except Exception as _ce:
                     print(f"[Audio cache] prod={pid} error: {_ce}")
+                    # Clean up any partial/empty file that may have been created
+                    if os.path.exists(local) and os.path.getsize(local) == 0:
+                        try: os.remove(local)
+                        except Exception: pass
             if mp3_url:
                 threading.Thread(target=_cache_audio, args=(prod_id, mp3_url), daemon=True).start()
         return jsonify(data)
